@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>iOS AI Assistant</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 <style>
 :root {
   --bg:        #0c0d0f;
@@ -2085,6 +2086,8 @@ textarea::placeholder { color: var(--muted); }
   --text-lg:   17px;
   --text-xl:   20px;
   --text-2xl:  24px;
+  --bubble-max-desktop: 86%;
+  --bubble-max-mobile: 92%;
 
   /* Legacy aliases for existing selectors */
   --bg: var(--bg-base);
@@ -2920,6 +2923,7 @@ body::before,
 }
 
 .msg {
+  width: 100%;
   max-width: 100%;
   gap: 0;
   animation: msgInModern 0.15s ease both;
@@ -2936,16 +2940,17 @@ body::before,
 }
 
 .msg-content {
-  max-width: 80%;
+  max-width: none;
+  width: 100%;
+  display: flex;
 }
 
 .msg.user .msg-content {
-  max-width: 100%;
-  margin-left: auto;
+  justify-content: flex-end;
 }
 
 .msg.bot .msg-content {
-  margin-right: auto;
+  justify-content: flex-start;
 }
 
 .bubble {
@@ -2955,6 +2960,13 @@ body::before,
   font-size: var(--text-sm);
   border: 1px solid var(--border-default);
   white-space: pre-wrap;
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+.msg.user .bubble,
+.msg.bot .bubble {
+  max-width: var(--bubble-max-desktop);
 }
 
 .msg.user .bubble {
@@ -2963,12 +2975,7 @@ body::before,
   color: #fff;
   border-radius: 16px 16px 4px 16px;
   min-width: 48px;
-  width: fit-content;
-  max-width: 72%;
   margin-left: auto;
-  word-break: normal;
-  overflow-wrap: break-word;
-  white-space: pre-wrap;
 }
 
 .msg.bot .bubble {
@@ -2981,160 +2988,235 @@ body::before,
   display: none;
 }
 
-.bubble code {
-  font-family: var(--mono);
-  background: rgba(255,255,255,0.08);
-  border: 1px solid var(--border-default);
-  border-radius: 6px;
-  padding: 1px 6px;
-  color: var(--text-code);
-  font-size: 12px;
+.bubble.assistant {
+  white-space: pre-wrap;
 }
 
-.bubble .code-block {
-  margin: 10px 0 4px;
+.bubble.assistant .hljs {
+  background: #0e0e10;
+  border-radius: 8px;
+  padding: 14px 16px;
+  font-size: 13px;
+  font-family: "SF Mono", Menlo, monospace;
+  overflow-x: auto;
+}
+
+.bubble.assistant h1,
+.bubble.assistant h2,
+.bubble.assistant h3 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 14px 0 6px;
+}
+
+.bubble.assistant h1:first-child,
+.bubble.assistant h2:first-child,
+.bubble.assistant h3:first-child {
+  margin-top: 0;
+}
+
+.bubble.assistant ul,
+.bubble.assistant ol {
+  padding-left: 20px;
+  margin: 6px 0;
+}
+
+.bubble.assistant li {
+  margin-bottom: 4px;
+  line-height: 1.6;
+}
+
+.bubble.assistant code:not(.hljs) {
+  background: var(--bg-elevated);
   border: 1px solid var(--border-default);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-family: "SF Mono", Menlo, monospace;
+  font-size: 12.5px;
+  color: #7dd3a8;
+}
+
+.bubble.assistant p {
+  margin-bottom: 8px;
+  line-height: 1.65;
+}
+
+.bubble.assistant p:last-child {
+  margin-bottom: 0;
+}
+
+.bubble.assistant hr {
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  margin: 12px 0;
+}
+
+.bubble.assistant strong {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.bubble.assistant blockquote {
+  border-left: 3px solid var(--accent-blue);
+  padding-left: 12px;
+  color: var(--text-secondary);
+  margin: 8px 0;
+}
+
+.bubble.assistant pre {
+  position: relative;
+  margin: 10px 0;
   border-radius: 8px;
   overflow: hidden;
-  background: #0d0d0f;
-}
-
-.bubble .code-block-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 10px;
-  background: rgba(255,255,255,0.04);
-  border-bottom: 1px solid var(--border-subtle);
-  font-size: var(--text-xs);
-}
-
-.bubble .code-lang {
-  color: var(--text-secondary);
-  text-transform: none;
-}
-
-.bubble .code-copy-btn {
   border: 1px solid var(--border-default);
-  background: transparent;
+}
+
+.bubble.assistant .btn-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  border: 1px solid var(--border-default);
+  background: rgba(12,13,15,0.9);
   color: var(--text-secondary);
   border-radius: 6px;
-  font-size: var(--text-xs);
   padding: 2px 8px;
+  font-size: 11px;
   cursor: pointer;
 }
 
-.bubble .code-copy-btn:hover {
+.bubble.assistant .btn-copy:hover {
+  border-color: var(--accent-blue);
   color: var(--text-primary);
+}
+
+.question-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.form-question-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 7px;
+}
+
+.form-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.form-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+}
+
+.form-chip:hover {
+  border-color: rgba(10,132,255,0.5);
+  color: var(--text-primary);
+  background: rgba(10,132,255,0.08);
+}
+
+.form-chip.selected {
+  background: rgba(10,132,255,0.15);
+  border-color: var(--accent-blue);
+  color: var(--text-primary);
+}
+
+.chip-num {
+  font-weight: 700;
+  color: var(--accent-blue);
+  font-size: 12px;
+}
+
+.form-text-input {
+  width: 100%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  color: var(--text-primary);
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.form-text-input:focus {
   border-color: var(--accent-blue);
 }
 
-.bubble .code-copy-btn.copied {
-  color: var(--accent-green);
-  border-color: rgba(48,209,88,0.4);
-}
-
-.bubble .code-block pre {
-  margin: 0;
-  padding: 12px 16px;
-  overflow-x: hidden;
-}
-
-.bubble .code-block code {
-  border: none;
-  background: transparent;
-  padding: 0;
-  color: var(--text-code);
-  font-family: var(--mono);
-  font-size: 12px;
-  display: block;
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow-wrap: break-word;
-  overflow-x: hidden;
-}
-
-.bubble .code-block.is-code pre {
-  overflow-x: auto;
-}
-
-.bubble .code-block.is-code code {
-  white-space: pre;
-  word-break: normal;
-  overflow-wrap: normal;
-  overflow-x: auto;
-}
-
-.bubble .code-block code .tok-keyword { color: #ff7ab2; }
-.bubble .code-block code .tok-type { color: #8be9fd; }
-.bubble .code-block code .tok-string { color: #f4d35e; }
-.bubble .code-block code .tok-number { color: #c792ea; }
-.bubble .code-block code .tok-comment { color: #6b7280; }
-.bubble .code-block code .tok-attribute { color: #7fdc8a; }
-.bubble .code-block code .tok-json-key { color: #8be9fd; }
-.bubble .code-block code .tok-diff-add {
-  color: var(--accent-green);
-  background: rgba(48,209,88,0.08);
-  display: block;
-}
-.bubble .code-block code .tok-diff-del {
-  color: var(--accent-red);
-  background: rgba(255,69,58,0.08);
-  display: block;
-}
-.bubble .code-block code .tok-diff-hunk {
-  color: var(--accent-blue);
-  font-weight: 500;
-  display: block;
-}
-.bubble .code-block code .tok-error { color: var(--accent-red); }
-.bubble .code-block code .tok-warning { color: var(--accent-orange); }
-
-.bubble .msg-item {
-  padding: 10px 0;
-  border-bottom: 1px solid rgba(255,255,255,0.05);
-}
-
-.bubble .msg-item:last-child {
-  border-bottom: none;
-}
-
-.bubble .msg-item-title {
-  font-weight: 500;
-  color: var(--text-primary);
-  margin-bottom: 4px;
-}
-
-.bubble .msg-item-body {
-  color: var(--text-secondary);
-  font-size: 13px;
-  line-height: 1.55;
+.form-send-bar {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 6px;
+  padding: 10px 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
 }
 
-.bubble .msg-dash-row {
+.form-preview {
   display: flex;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  padding: 1px 0;
   flex-wrap: wrap;
-}
-
-.bubble .msg-dash-label {
+  gap: 6px;
+  font-size: 12px;
+  font-family: "SF Mono", Menlo, monospace;
   color: var(--text-muted);
+}
+
+.preview-item.preview-answered .preview-val {
+  color: var(--accent-green);
+}
+
+.form-send-btn {
   flex-shrink: 0;
-  min-width: 100px;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  color: var(--text-muted);
+  padding: 8px 16px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: not-allowed;
+  transition: all 0.2s;
+  white-space: nowrap;
 }
 
-.bubble .msg-paragraph {
-  margin-bottom: 12px;
+.form-send-btn.ready {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+  color: white;
+  cursor: pointer;
 }
 
-.bubble .msg-paragraph:last-child {
-  margin-bottom: 0;
+.form-send-btn.ready:hover {
+  background: #1a8fff;
+}
+
+.form-submitted .form-chip,
+.form-submitted .form-text-input {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.form-submitted .form-send-bar {
+  opacity: 0.5;
 }
 
 .typing-bubble {
@@ -3641,11 +3723,13 @@ textarea::placeholder,
   }
 
   .msg-content {
-    max-width: 90%;
+    max-width: none;
+    width: 100%;
   }
 
-  .msg.user .msg-content {
-    max-width: 86%;
+  .msg.user .bubble,
+  .msg.bot .bubble {
+    max-width: var(--bubble-max-mobile);
   }
 
   .input-area {
@@ -3839,11 +3923,8 @@ textarea::placeholder,
       <div class="task-current" id="taskCurrentStep">Ожидается план и старт задачи.</div>
       <div class="task-state-reason" id="taskStateReason"></div>
       <ul class="task-done-list" id="taskDoneList"></ul>
-      <div class="task-validation" id="taskValidationBlock">Проверьте итог и подтвердите завершение задачи.</div>
+      <div class="task-validation" id="taskValidationBlock">Проверьте итог. Если есть замечания, напишите их.</div>
       <div class="task-done-badge" id="taskDoneBadge">Задача завершена. Рабочая память заморожена.</div>
-      <button type="button" class="task-validation-btn" id="taskValidationBtn" onclick="triggerValidationAction()">
-        Перейти к валидации
-      </button>
       <div class="idle-panel" id="idlePanel">
         <div class="idle-section">
           <div class="idle-section-label">Текущий проект</div>
@@ -3980,9 +4061,11 @@ textarea::placeholder,
       </div>
     </div>
 
-  </main>
+</main>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/11.2.0/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script>
   /* ── Page Loader ── */
   const LOADER_PROGRESS = { connect: 10, session: 35, history: 65, data: 85, ready: 100 };
@@ -4053,6 +4136,8 @@ textarea::placeholder,
   let activeProjectName = '';
   let projectDeleteConfirmId = null;
   let projectItemErrors = {};
+  const formSelections = {};
+  let assistantMessageSeq = 0;
   let currentWorkingView = {
     state: null,
     current_step: null,
@@ -4210,7 +4295,7 @@ textarea::placeholder,
       validationBlock.classList.toggle('visible', state === 'VALIDATION' || isAwaitingValidation);
       validationBlock.textContent = isAwaitingValidation
         ? 'Все шаги завершены. Ожидается валидация.'
-        : 'Проверьте итог и подтвердите завершение задачи.';
+        : 'Проверьте итог. Если есть замечания, напишите их.';
     }
 
     const doneBadge = document.getElementById('taskDoneBadge');
@@ -4218,103 +4303,26 @@ textarea::placeholder,
       doneBadge.classList.toggle('visible', state === 'DONE');
     }
 
-    const validationBtn = document.getElementById('taskValidationBtn');
-    if (validationBtn) {
-      const visible = state === 'VALIDATION' || isAwaitingValidation;
-      validationBtn.classList.toggle('visible', visible);
-      validationBtn.textContent = state === 'VALIDATION' ? 'Подтвердить завершение' : 'Перейти к валидации';
-    }
-
     renderTaskActions(state, isAwaitingValidation, normalizedActions);
     updateInputState();
   }
 
   function buildTaskActions(state, isAwaitingValidation) {
-    if (state === 'PLANNING') {
-      return [
-        {
-          id: 'auto_plan',
-          label: 'Сформировать план автоматически',
-          kind: 'message',
-          message: 'Сформируй план задачи автоматически на основе цели',
-        },
-        {
-          id: 'clarify_goal',
-          label: 'Уточнить цель задачи',
-          kind: 'message',
-          message: 'Давай уточним цель задачи перед планированием',
-        },
-      ];
-    }
-    if (state === 'EXECUTION') {
-      return [
-        {
-          id: 'complete_step',
-          label: 'Шаг выполнен',
-          kind: 'message',
-          message: 'Текущий шаг выполнен, переходим к следующему',
-        },
-        {
-          id: 'show_status',
-          label: 'Статус задачи',
-          kind: 'message',
-          message: 'Покажи текущий статус и прогресс задачи',
-        },
-      ];
-    }
-    if (state === 'VALIDATION') {
-      return [
-        {
-          id: 'confirm_done',
-          label: 'Подтвердить завершение',
-          kind: 'message',
-          message: 'Подтверждаю выполнение задачи, переходим к итогам',
-        },
-        {
-          id: 'back_to_execution',
-          label: 'Вернуться к выполнению',
-          kind: 'message',
-          message: 'Нужно доработать, возвращаемся к выполнению',
-        },
-      ];
-    }
-    if (state === 'DONE') {
-      return [
-        {
-          id: 'new_task',
-          label: 'Начать новую задачу',
-          kind: 'client_action',
-          client_action: 'reset_chat',
-        },
-        {
-          id: 'save_results',
-          label: 'Сохранить итоги в память',
-          kind: 'message',
-          message: 'Сохрани ключевые решения и итоги задачи в долгосрочную память',
-        },
-      ];
-    }
+    void state;
+    void isAwaitingValidation;
     return [];
   }
 
   function renderTaskActions(state, isAwaitingValidation, preferredActions = []) {
+    void state;
+    void isAwaitingValidation;
+    void preferredActions;
     const wrap = document.getElementById('taskActionsWrap');
     const container = document.getElementById('taskStateActions');
     if (!wrap || !container) return;
-
-    const serverActions = normalizeWorkingActions(preferredActions);
-    currentTaskActions = serverActions.length ? serverActions : buildTaskActions(state, isAwaitingValidation);
-    if (!currentTaskActions.length) {
-      wrap.classList.remove('visible');
-      container.innerHTML = '';
-      return;
-    }
-
-    const items = currentTaskActions.map((item, idx) => (
-      `<button type="button" class="task-action-btn${idx === 0 ? ' primary' : ''}" onclick="handleActionClick(currentTaskActions[${idx}])">${esc(item.label)}</button>`
-    ));
-    container.innerHTML = items.join('');
-    wrap.classList.add('visible');
+    currentTaskActions = [];
+    container.innerHTML = '';
+    wrap.classList.remove('visible');
   }
 
   async function handleActionClick(action) {
@@ -4351,7 +4359,7 @@ textarea::placeholder,
     } else if (state === 'EXECUTION' && isAwaitingValidation) {
       reasonText = 'Все шаги завершены. Ожидается валидация.';
     } else if (state === 'VALIDATION') {
-      reasonText = 'Доступно только подтверждение валидации.';
+      reasonText = 'Финальная валидация: если есть замечания, напишите их в сообщении.';
     } else if (state === 'DONE') {
       reasonText = 'Задача завершена. Working memory заморожена.';
     }
@@ -4362,24 +4370,6 @@ textarea::placeholder,
       btn.disabled = isBusy;
     });
     reason.textContent = reasonText;
-  }
-
-  function triggerValidationAction() {
-    const state = currentWorkingView.state;
-    if (state === 'VALIDATION') {
-      sendMsg('подтверждаю завершение');
-      return;
-    }
-    const total = Number(currentWorkingView.total_steps || 0);
-    const done = currentWorkingView.done || [];
-    const isAwaitingValidation =
-      state === 'EXECUTION'
-      && !currentWorkingView.current_step
-      && total > 0
-      && done.length === total;
-    if (isAwaitingValidation) {
-      sendMsg('перейди в validation');
-    }
   }
 
   function populateModelSelect(models) {
@@ -4869,865 +4859,260 @@ textarea::placeholder,
   })();
 
   function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-  function renderInlineMarkdown(s) {
-    return esc(s)
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*([^*\n]+)\*/g, '<em>$1</em>')
-      .replace(/`([^`]+)`/g, '<code>$1</code>');
-  }
-  function renderBasicMarkdown(text) {
-    const raw = String(text || '').replace(/^\s{0,3}#{1,6}\s+/gm, '');
-    const lines = raw.split('\n');
-    const out = [];
-
-    const isTableRow = (line) => /^\s*\|.*\|\s*$/.test(line);
-    const isTableSeparator = (line) => /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
-    const parseCells = (line) =>
-      line
-        .trim()
-        .replace(/^\|/, '')
-        .replace(/\|$/, '')
-        .split('|')
-        .map((c) => c.trim());
-
-    let i = 0;
-    while (i < lines.length) {
-      if (/^\s*```/.test(lines[i])) {
-        const fence = lines[i].trim();
-        const lang = fence.replace(/^```/, '').trim();
-        const codeLines = [];
-        i += 1;
-        while (i < lines.length && !/^\s*```/.test(lines[i])) {
-          codeLines.push(lines[i]);
-          i += 1;
+  if (window.marked && window.hljs) {
+    marked.setOptions({
+      breaks: true,
+      gfm: true,
+      highlight(code, lang) {
+        if (lang && hljs.getLanguage(lang)) {
+          return hljs.highlight(code, { language: lang }).value;
         }
-        if (i < lines.length && /^\s*```/.test(lines[i])) i += 1;
-        out.push(renderCodeBlockFromText(codeLines.join('\n'), lang, { forceCode: true }));
-        continue;
-      }
-
-      if (i + 1 < lines.length && isTableRow(lines[i]) && isTableSeparator(lines[i + 1])) {
-        const header = parseCells(lines[i]);
-        const rows = [];
-        i += 2;
-
-        while (i < lines.length && isTableRow(lines[i])) {
-          const row = parseCells(lines[i]);
-          rows.push(row);
-          i += 1;
-        }
-
-        const thead = `<tr>${header.map((h) => `<th>${renderInlineMarkdown(h)}</th>`).join('')}</tr>`;
-        const tbody = rows
-          .map((row) => {
-            const padded = header.map((_, idx) => row[idx] ?? '—');
-            return `<tr>${padded.map((c) => `<td>${renderInlineMarkdown(c)}</td>`).join('')}</tr>`;
-          })
-          .join('');
-        out.push(`<div class="md-table-wrap"><table class="md-table"><thead>${thead}</thead><tbody>${tbody}</tbody></table></div>`);
-        continue;
-      }
-
-      out.push(renderInlineMarkdown(lines[i]));
-      i += 1;
-    }
-
-    return out.join('\n');
+        return hljs.highlightAuto(code).value;
+      },
+    });
   }
 
-  function isMarkdownTableParagraph(paragraph) {
-    const lines = String(paragraph || '').split('\n').map((line) => line.trim()).filter(Boolean);
-    if (lines.length < 2) return false;
-    const isTableRow = (line) => /^\s*\|.*\|\s*$/.test(line);
-    const isTableSeparator = (line) => /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
-    return isTableRow(lines[0]) && isTableSeparator(lines[1]);
+  function renderAssistantMessage(raw) {
+    if (!window.marked) return esc(raw).replace(/\n/g, '<br>');
+    return marked.parse(String(raw || ''));
   }
 
-  function renderStructuredLines(lines) {
-    const rows = [];
-    const plain = [];
-    const flushPlain = () => {
-      if (!plain.length) return;
-      rows.push(`<div class="msg-paragraph">${renderInlineMarkdown(plain.join(' '))}</div>`);
-      plain.length = 0;
+  function addCopyButton(pre) {
+    if (!pre || pre.querySelector('.btn-copy')) return;
+    const codeEl = pre.querySelector('code');
+    if (!codeEl) return;
+    const btn = document.createElement('button');
+    btn.className = 'btn-copy';
+    btn.textContent = 'Copy';
+    btn.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(String(codeEl.textContent || ''));
+        btn.textContent = '✓';
+        setTimeout(() => {
+          btn.textContent = 'Copy';
+        }, 2000);
+      } catch (_) {
+        btn.textContent = '×';
+        setTimeout(() => {
+          btn.textContent = 'Copy';
+        }, 1200);
+      }
     };
+    pre.style.position = 'relative';
+    pre.appendChild(btn);
+  }
 
-    lines.forEach((rawLine) => {
-      const line = String(rawLine || '').trim();
-      if (!line) {
-        flushPlain();
-        return;
+  function _getQuestionHeaderIndices(lines) {
+    const headerRe = /^\s*(\d+)[.)]\s+(.+):\s*$/;
+    const indices = [];
+    lines.forEach((line, idx) => {
+      if (headerRe.test(String(line || ''))) indices.push(idx);
+    });
+    return indices;
+  }
+
+  function isQuestionForm(rawText) {
+    const text = String(rawText == null ? '' : rawText).replace(/\r\n?/g, '\n');
+    const lines = text.split('\n');
+    const headerRe = /^\s*(\d+)[.)]\s+(.+):\s*$/;
+    const count = lines.reduce((acc, line) => acc + (headerRe.test(String(line || '')) ? 1 : 0), 0);
+    return count >= 2;
+  }
+
+  function parseQuestionForm(rawText) {
+    const text = String(rawText == null ? '' : rawText).replace(/\r\n?/g, '\n');
+    const lines = text.split('\n');
+    const headerRe = /^\s*(\d+)[.)]\s+(.+):\s*$/;
+    const headerIndices = _getQuestionHeaderIndices(lines);
+    const questions = [];
+
+    headerIndices.forEach((startIdx, i) => {
+      const endIdx = i + 1 < headerIndices.length ? headerIndices[i + 1] : lines.length;
+      const headerLine = String(lines[startIdx] || '');
+      const headerMatch = headerLine.match(headerRe);
+      if (!headerMatch) return;
+
+      const index = Number(headerMatch[1]);
+      const title = String(headerMatch[2] || '').trim();
+      const blockLines = lines
+        .slice(startIdx + 1, endIdx)
+        .map((line) => String(line || '').trim())
+        .filter(Boolean);
+      const blockText = blockLines.join(' ');
+      const freeText = /напишите текстом|введите/i.test(`${title} ${blockText}`);
+      const options = [];
+
+      if (!freeText) {
+        const optionRe = /(\d+)\s*[—\-]\s*([^,\d—]+?)(?=,\s*\d+\s*[—\-]|[.;]?\s*$)/g;
+        let match;
+        while ((match = optionRe.exec(blockText)) !== null) {
+          options.push({ num: String(match[1]).trim(), text: String(match[2]).trim() });
+        }
       }
-      const dashMatch = line.match(/^[–—-]\s*([^:]{1,40}):\s*(.*)$/);
-      if (dashMatch) {
-        flushPlain();
-        const label = dashMatch[1].trim();
-        const value = dashMatch[2].trim();
-        rows.push(
-          `<div class="msg-dash-row">`
-          + `<span class="msg-dash-label">${esc(label)}:</span>`
-          + `<span>${renderInlineMarkdown(value)}</span>`
+
+      questions.push({ index, title, options, freeText });
+    });
+
+    return questions;
+  }
+
+  function renderQuestionForm(rawText, messageId) {
+    const text = String(rawText == null ? '' : rawText).replace(/\r\n?/g, '\n');
+    const lines = text.split('\n');
+    const headerIndices = _getQuestionHeaderIndices(lines);
+    const questions = parseQuestionForm(text);
+
+    if (!questions.length) return renderAssistantMessage(text);
+    if (!formSelections[messageId]) formSelections[messageId] = {};
+
+    const prefixText = headerIndices.length ? lines.slice(0, headerIndices[0]).join('\n').trim() : '';
+    const prefixHtml = prefixText ? `<div class="form-prefix">${renderAssistantMessage(prefixText)}</div>` : '';
+
+    const questionsHtml = questions.map((q) => {
+      const qNum = String(q.index);
+      const useInput = Boolean(q.freeText) || !Array.isArray(q.options) || q.options.length === 0;
+      if (useInput) {
+        return (
+          `<div class="form-question" data-q="${esc(qNum)}">`
+          + `<div class="form-question-title">${esc(`${qNum}. ${q.title}`)}</div>`
+          + `<input class="form-text-input" data-q="${esc(qNum)}" placeholder="Введите ответ..." oninput="onFormInput('${esc(messageId)}')">`
           + `</div>`
         );
-        return;
       }
-      plain.push(line);
-    });
-
-    flushPlain();
-    return rows.join('');
-  }
-
-  function renderNumberedParagraph(lines) {
-    const itemRegex = /^(\d+[\).])\s+(.+)$/;
-    const intro = [];
-    const items = [];
-    let current = null;
-
-    lines.forEach((rawLine) => {
-      const line = String(rawLine || '').trim();
-      if (!line) return;
-      const match = line.match(itemRegex);
-      if (match) {
-        if (current) items.push(current);
-        current = {
-          title: `${match[1]} ${match[2].trim()}`,
-          body: [],
-        };
-        return;
-      }
-      if (current) {
-        current.body.push(line);
-      } else {
-        intro.push(line);
-      }
-    });
-
-    if (current) items.push(current);
-
-    const chunks = [];
-    if (intro.length) chunks.push(renderStructuredLines(intro));
-    items.forEach((item) => {
-      const bodyHtml = renderStructuredLines(item.body);
-      chunks.push(
-        `<div class="msg-item">`
-        + `<div class="msg-item-title">${renderInlineMarkdown(item.title)}</div>`
-        + (bodyHtml ? `<div class="msg-item-body">${bodyHtml}</div>` : '')
+      const chips = q.options.map((opt) => (
+        `<button class="form-chip" data-q="${esc(qNum)}" data-num="${esc(opt.num)}" onclick="selectFormChip(this, '${esc(messageId)}')">`
+        + `<span class="chip-num">${esc(opt.num)}</span>`
+        + `<span class="chip-text">${esc(opt.text)}</span>`
+        + `</button>`
+      )).join('');
+      return (
+        `<div class="form-question" data-q="${esc(qNum)}">`
+        + `<div class="form-question-title">${esc(`${qNum}. ${q.title}`)}</div>`
+        + `<div class="form-chips">${chips}</div>`
         + `</div>`
       );
-    });
-    return chunks.join('');
-  }
-
-  const LANG_DISPLAY = {
-    swift: 'Swift',
-    kotlin: 'Kotlin',
-    dart: 'Dart',
-    objc: 'Objective-C',
-    javascript: 'JavaScript',
-    typescript: 'TypeScript',
-    python: 'Python',
-    ruby: 'Ruby',
-    go: 'Go',
-    rust: 'Rust',
-    c: 'C',
-    cpp: 'C++',
-    css: 'CSS',
-    scss: 'SCSS',
-    html: 'HTML',
-    sql: 'SQL',
-    graphql: 'GraphQL',
-    yaml: 'YAML',
-    toml: 'TOML',
-    json: 'JSON',
-    bash: 'Bash',
-    dockerfile: 'Dockerfile',
-    diff: 'Diff',
-    terminal: 'Terminal',
-    markdown: 'Markdown',
-    regex: 'Regex',
-    code: '',
-  };
-
-  function normalizeLangHint(hint) {
-    const raw = String(hint || '').trim().toLowerCase();
-    if (!raw) return '';
-    const aliases = {
-      js: 'javascript',
-      mjs: 'javascript',
-      cjs: 'javascript',
-      jsx: 'javascript',
-      ts: 'typescript',
-      tsx: 'typescript',
-      py: 'python',
-      rb: 'ruby',
-      rs: 'rust',
-      kt: 'kotlin',
-      kts: 'kotlin',
-      yml: 'yaml',
-      md: 'markdown',
-      shell: 'bash',
-      sh: 'bash',
-      zsh: 'bash',
-      console: 'terminal',
-      terminaloutput: 'terminal',
-      terminal_output: 'terminal',
-      diffpatch: 'diff',
-      patch: 'diff',
-      docker: 'dockerfile',
-      'docker-file': 'dockerfile',
-      gql: 'graphql',
-      objectivec: 'objc',
-      'objective-c': 'objc',
-      'c++': 'cpp',
-      cc: 'cpp',
-      cxx: 'cpp',
-      hpp: 'cpp',
-      h: 'c',
-      xml: 'html',
-      plain: 'code',
-      plaintext: 'code',
-    };
-    return aliases[raw] || raw;
-  }
-
-  function detectLanguage(code, hint) {
-    const normalizedHint = normalizeLangHint(hint);
-    if (normalizedHint && normalizedHint !== 'code') return normalizedHint;
-
-    const c = String(code || '').trim();
-    if (!c) return 'code';
-    const first = c.split('\n')[0] || '';
-
-    if (/^(FROM|RUN|COPY|ADD|ENV|EXPOSE|CMD|ENTRYPOINT|WORKDIR|ARG|LABEL)\b/m.test(c))
-      return 'dockerfile';
-
-    if (/^(diff |--- |\+\+\+ |@@)/.test(c)
-      || (/^[+-][^+-]/.test(c) && /^[+-][^+-]/m.test(c)))
-      return 'diff';
-
-    if (/\b(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|FROM|WHERE|JOIN|GROUP BY|ORDER BY)\b/i.test(c))
-      return 'sql';
-
-    if (/\b(query|mutation|subscription|type|schema|fragment|input|enum)\b/.test(first)
-      && /[{}]/.test(c))
-      return 'graphql';
-
-    if (/^<(!DOCTYPE|html|head|body|div|span|[a-zA-Z])/i.test(c))
-      return 'html';
-
-    if (/(@media|@mixin|@include|\$[\w-]+\s*:)/.test(c)
-      || (/[{};]/.test(c) && /[\w-]+\s*:\s*[\w#"'(]/.test(c) && !/{/.test(first)))
-      return c.includes('$') ? 'scss' : 'css';
-
-    if (/\b(func|guard|struct|protocol|extension|@State|@Binding|@Published|@MainActor|SwiftUI|UIKit)\b/.test(c)
-      || /import (Foundation|SwiftUI|UIKit|Combine|UserNotifications|CoreData|StoreKit|WidgetKit)/.test(c)
-      || /@(State|Binding|Published|ObservedObject|EnvironmentObject|MainActor|ViewBuilder)/.test(c))
-      return 'swift';
-
-    if (/#import|@interface|@implementation|@property|@synthesize|@end/.test(c)
-      || /\[\w+ \w+\]/.test(c))
-      return 'objc';
-
-    if (/\b(fun |val |var |data class|companion object|suspend fun|coroutine|Composable)\b/.test(c)
-      || /@(Composable|Override|JvmStatic|Inject)/.test(c))
-      return 'kotlin';
-
-    if (/\b(Widget|StatefulWidget|StatelessWidget|BuildContext|setState|MaterialApp)\b/.test(c)
-      || /void build\(BuildContext/.test(c)
-      || /@override[\s\S]*?\{/.test(c))
-      return 'dart';
-
-    if (/^package \w/.test(c)
-      || /^import \(/m.test(c)
-      || /\b(func |goroutine|go func|chan |:= |defer |interface\{)\b/.test(c))
-      return 'go';
-
-    if (/\b(fn |let mut |impl |pub |use |match |Some\(|None|Result<|Vec<)\b/.test(c)
-      || (/->.*\{/.test(c) && /fn /.test(c)))
-      return 'rust';
-
-    if (/\b(def |end$|require |attr_\w*|puts |\.each|do \|)\b/m.test(c))
-      return 'ruby';
-
-    if (/^(def |class |import |from |if __name__|async def |@app\.)/m.test(c)
-      || (/:\s*$/.test(first) && !/=>/.test(c)))
-      return 'python';
-
-    if (/^(#!\/bin\/(bash|sh|zsh)|echo |export |alias |source )/m.test(c)
-      || (/\$\{?[\w]+\}?/.test(c) && /[\|&;]/.test(c)))
-      return 'bash';
-
-    if (/^(\$|>|❯|%)\s/.test(first))
-      return 'terminal';
-
-    if (/^\[[\w.]+\]/.test(c) && /\w+\s*=\s*/.test(c))
-      return 'toml';
-
-    const yamlLines = c
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => /^[\w-]+:\s+\S/.test(line))
-      .length;
-    if (yamlLines >= 3 && !/{/.test(first) && !/=>/.test(c))
-      return 'yaml';
-
-    if (/^\s*[\[{]/.test(c) && /[}\]]\s*$/.test(c)) {
-      try { JSON.parse(code); return 'json'; } catch (_) { return 'json'; }
-    }
-
-    if (/^#{1,6} /.test(first) || /\*\*\w/.test(c) || /`[^`]+`/.test(c) || /^\- \[[ x]\]/m.test(c))
-      return 'markdown';
-
-    if (/\b(interface |type \w+ =|:\s*(string|number|boolean|void|never|unknown)|<T>|as const)\b/.test(c))
-      return 'typescript';
-
-    if (/\b(const |let |var |function |=>|require\(|module\.exports|document\.|console\.)\b/.test(c))
-      return 'javascript';
-
-    if (/^\/[^/\n]+\/[gimsuy]*$/.test(c))
-      return 'regex';
-
-    if (/#include|int main\(|std::|nullptr|printf\(|cout <</.test(c))
-      return c.includes('::') || c.includes('cout') ? 'cpp' : 'c';
-
-    return 'code';
-  }
-
-  function _protectHighlighted(html) {
-    const buckets = [];
-    const protectedHtml = String(html || '').replace(
-      /<span class="tok-[^"]+">[\s\S]*?<\/span>/g,
-      (m) => `__TOK_${buckets.push(m) - 1}__`
-    );
-    return { protectedHtml, buckets };
-  }
-
-  function _restoreHighlighted(html, buckets) {
-    return String(html || '').replace(/__TOK_(\d+)__/g, (_, idx) => buckets[Number(idx)] || '');
-  }
-
-  function applyTokens(h, rules) {
-    let out = String(h || '');
-    for (const [re, cls] of rules) {
-      const { protectedHtml, buckets } = _protectHighlighted(out);
-      let next = protectedHtml;
-      if (typeof cls === 'function') {
-        next = next.replace(re, (...args) => cls(...args));
-      } else {
-        next = next.replace(re, (m) => (m.startsWith('<span') ? m : `<span class="${cls}">${m}</span>`));
-      }
-      out = _restoreHighlighted(next, buckets);
-    }
-    return out;
-  }
-
-  function baseRules(keywords, extras = [], options = {}) {
-    const rules = [
-      [/"([^"\\]|\\.)*"|'([^'\\]|\\.)*'|`([^`\\]|\\.)*`/g, 'tok-string'],
-      [/\/\/[^\n]*/g, 'tok-comment'],
-      [/\/\*[\s\S]*?\*\//g, 'tok-comment'],
-    ];
-    if (options.hashComments !== false) {
-      rules.push([/#[^\n]*/g, 'tok-comment']);
-    }
-    rules.push(
-      [new RegExp(`\\b(${keywords.join('|')})\\b`, 'g'), 'tok-keyword'],
-      [/\b\d+\.?\d*\b/g, 'tok-number'],
-      ...extras
-    );
-    return rules;
-  }
-
-  function highlightTypeScript(h) {
-    return applyTokens(h, baseRules(
-      ['import','export','from','const','let','var','function','return',
-        'if','else','for','while','class','extends','implements','new',
-        'this','super','typeof','instanceof','async','await','try','catch',
-        'throw','interface','type','enum','namespace','declare','readonly',
-        'public','private','protected','static','abstract','override',
-        'true','false','null','undefined','void','never','any','unknown'],
-      [
-        [/\b([A-Z][a-zA-Z0-9]*)\b/g, 'tok-type'],
-        [/:\s*(string|number|boolean|void|never|unknown|any)\b/g, 'tok-type'],
-        [/@\w+/g, 'tok-attribute'],
-      ]
-    ));
-  }
-
-  function highlightJavaScript(h) {
-    return applyTokens(h, baseRules(
-      ['import','export','from','const','let','var','function','return',
-        'if','else','for','of','in','while','do','class','extends','new',
-        'this','super','typeof','instanceof','async','await','try','catch',
-        'finally','throw','switch','case','default','break','continue',
-        'true','false','null','undefined'],
-      [
-        [/\b([A-Z][a-zA-Z0-9]*)\b/g, 'tok-type'],
-        [/`[^`]*`/g, 'tok-string'],
-      ]
-    ));
-  }
-
-  function highlightKotlin(h) {
-    return applyTokens(h, baseRules(
-      ['fun','val','var','class','data','object','companion','interface',
-        'return','if','else','when','for','while','do','try','catch',
-        'throw','import','package','suspend','coroutine','override',
-        'private','public','protected','internal','open','abstract',
-        'sealed','inline','reified','true','false','null','in','is',
-        'as','by','it','this','super','init','constructor','lateinit',
-        'lazy','const','typealias'],
-      [
-        [/@\w+/g, 'tok-attribute'],
-        [/\b([A-Z][a-zA-Z0-9]*)\b/g, 'tok-type'],
-      ]
-    ));
-  }
-
-  function highlightDart(h) {
-    return applyTokens(h, baseRules(
-      ['import','export','library','part','class','extends','implements',
-        'mixin','abstract','enum','typedef','void','return','if','else',
-        'for','while','do','switch','case','break','continue','try','catch',
-        'finally','throw','new','const','final','var','late','required',
-        'true','false','null','this','super','async','await','get','set',
-        'static','override','factory'],
-      [
-        [/@\w+/g, 'tok-attribute'],
-        [/\b([A-Z][a-zA-Z0-9]*)\b/g, 'tok-type'],
-      ]
-    ));
-  }
-
-  function highlightGo(h) {
-    return applyTokens(h, baseRules(
-      ['package','import','func','var','const','type','struct','interface',
-        'map','chan','go','defer','select','case','default','for','range',
-        'if','else','switch','return','break','continue','goto','fallthrough',
-        'true','false','nil','iota','make','new','len','cap','append',
-        'copy','delete','close','panic','recover'],
-      [
-        [/\b([A-Z][a-zA-Z0-9]*)\b/g, 'tok-type'],
-        [/:=/g, 'tok-keyword'],
-      ]
-    ));
-  }
-
-  function highlightRust(h) {
-    return applyTokens(h, baseRules(
-      ['fn','let','mut','const','static','struct','enum','trait','impl',
-        'use','mod','pub','crate','super','self','Self','return','if','else',
-        'match','for','while','loop','break','continue','move','async',
-        'await','dyn','where','type','ref','in','as','true','false',
-        'Some','None','Ok','Err','Box','Vec','String','Option','Result'],
-      [
-        [/\b([A-Z][a-zA-Z0-9]*)\b/g, 'tok-type'],
-        [/'\w+/g, 'tok-attribute'],
-        [/\/\/![^\n]*/g, 'tok-comment'],
-      ]
-    ));
-  }
-
-  function highlightRuby(h) {
-    return applyTokens(h, baseRules(
-      ['def','end','class','module','include','extend','require','require_relative',
-        'attr_accessor','attr_reader','attr_writer','return','if','elsif','else',
-        'unless','case','when','then','while','until','for','do','yield',
-        'raise','rescue','ensure','begin','self','super','nil','true','false',
-        'puts','print','p','lambda','proc','new'],
-      [
-        [/:[a-z_]\w*/g, 'tok-attribute'],
-        [/@{1,2}\w+/g, 'tok-attribute'],
-        [/\$\w+/g, 'tok-attribute'],
-        [/\b([A-Z][a-zA-Z0-9]*)\b/g, 'tok-type'],
-      ]
-    ));
-  }
-
-  function highlightCSS(h) {
-    return applyTokens(h, [
-      [/"[^"]*"|'[^']*'/g, 'tok-string'],
-      [/\/\*[\s\S]*?\*\//g, 'tok-comment'],
-      [/(#[0-9a-fA-F]{3,8})\b/g, 'tok-number'],
-      [/\b\d+\.?\d*(px|em|rem|vh|vw|%|s|ms|deg)?\b/g, 'tok-number'],
-      [/@[\w-]+/g, 'tok-keyword'],
-      [/:([\w-]+)/g, 'tok-attribute'],
-      [/\$[\w-]+/g, 'tok-attribute'],
-      [/([\w-]+)\s*(?=:)/g, 'tok-type'],
-    ]);
-  }
-
-  function highlightHTML(h) {
-    return applyTokens(h, [
-      [/(&lt;!--[\s\S]*?--&gt;)/g, 'tok-comment'],
-      [/(&lt;\/?)([\w-]+)/g, (m, p1, p2) =>
-        `<span class="tok-keyword">${p1}</span><span class="tok-type">${p2}</span>`],
-      [/([\w-]+)(?=\s*=)/g, 'tok-attribute'],
-      [/"[^"]*"|'[^']*'/g, 'tok-string'],
-      [/(&amp;[\w#]+;)/g, 'tok-number'],
-    ]);
-  }
-
-  function highlightSQL(h) {
-    const kw = ['SELECT','FROM','WHERE','JOIN','LEFT','RIGHT','INNER','OUTER',
-      'ON','AND','OR','NOT','IN','LIKE','BETWEEN','IS','NULL','INSERT',
-      'INTO','VALUES','UPDATE','SET','DELETE','CREATE','TABLE','DROP',
-      'ALTER','ADD','COLUMN','INDEX','PRIMARY','KEY','FOREIGN','REFERENCES',
-      'UNIQUE','DEFAULT','GROUP','BY','ORDER','HAVING','LIMIT','OFFSET',
-      'AS','DISTINCT','COUNT','SUM','AVG','MIN','MAX','CASE','WHEN',
-      'THEN','ELSE','END','WITH','UNION','ALL','EXISTS'];
-    return applyTokens(h, [
-      [/--[^\n]*/g, 'tok-comment'],
-      [/"[^"]*"|'[^']*'/g, 'tok-string'],
-      [new RegExp(`\\b(${kw.join('|')})\\b`, 'gi'), 'tok-keyword'],
-      [/\b\d+\.?\d*\b/g, 'tok-number'],
-    ]);
-  }
-
-  function highlightGraphQL(h) {
-    return applyTokens(h, baseRules(
-      ['query','mutation','subscription','fragment','on','type','input',
-        'enum','interface','union','scalar','schema','extend','directive',
-        'true','false','null'],
-      [
-        [/\b([A-Z][a-zA-Z0-9]*)\b/g, 'tok-type'],
-        [/@\w+/g, 'tok-attribute'],
-        [/\$\w+/g, 'tok-attribute'],
-      ]
-    ));
-  }
-
-  function highlightYAML(h) {
-    return applyTokens(h, [
-      [/#[^\n]*/g, 'tok-comment'],
-      [/"[^"]*"|'[^']*'/g, 'tok-string'],
-      [/^([\w-]+)(?=\s*:)/gm, 'tok-type'],
-      [/:\s*(true|false|null|~)\b/g, 'tok-keyword'],
-      [/\b\d+\.?\d*\b/g, 'tok-number'],
-      [/^---/gm, 'tok-keyword'],
-      [/- /g, 'tok-keyword'],
-    ]);
-  }
-
-  function highlightTOML(h) {
-    return applyTokens(h, [
-      [/#[^\n]*/g, 'tok-comment'],
-      [/"[^"]*"|'[^']*'/g, 'tok-string'],
-      [/^\[[\w.]+\]/gm, 'tok-type'],
-      [/^([\w-]+)(?=\s*=)/gm, 'tok-attribute'],
-      [/\b(true|false)\b/g, 'tok-keyword'],
-      [/\b\d+\.?\d*\b/g, 'tok-number'],
-    ]);
-  }
-
-  function highlightDockerfile(h) {
-    return applyTokens(h, [
-      [/#[^\n]*/g, 'tok-comment'],
-      [/"[^"]*"|'[^']*'/g, 'tok-string'],
-      [/^(FROM|RUN|COPY|ADD|ENV|EXPOSE|CMD|ENTRYPOINT|WORKDIR|ARG|LABEL|USER|VOLUME|STOPSIGNAL|HEALTHCHECK|SHELL)\b/gm, 'tok-keyword'],
-      [/\$\{?[\w]+\}?/g, 'tok-attribute'],
-    ]);
-  }
-
-  function highlightDiff(h) {
-    return String(h || '')
-      .split('\n')
-      .map((line) => {
-        if (line.startsWith('+') && !line.startsWith('+++')) return `<span class="tok-diff-add">${line}</span>`;
-        if (line.startsWith('-') && !line.startsWith('---')) return `<span class="tok-diff-del">${line}</span>`;
-        if (line.startsWith('@@')) return `<span class="tok-diff-hunk">${line}</span>`;
-        if (line.startsWith('---') || line.startsWith('+++')) return `<span class="tok-comment">${line}</span>`;
-        return line;
-      })
-      .join('\n');
-  }
-
-  function highlightTerminal(h) {
-    return String(h || '')
-      .split('\n')
-      .map((line) => {
-        if (/^(\$|>|❯|%)\s/.test(line)) return `<span class="tok-attribute">${line}</span>`;
-        if (/error:|Error:/i.test(line)) return `<span class="tok-error">${line}</span>`;
-        if (/warning:|Warning:/i.test(line)) return `<span class="tok-warning">${line}</span>`;
-        return `<span class="tok-comment">${line}</span>`;
-      })
-      .join('\n');
-  }
-
-  function highlightMarkdown(h) {
-    return applyTokens(h, [
-      [/^#{1,6} .+/gm, 'tok-type'],
-      [/\*\*[^*]+\*\*/g, 'tok-keyword'],
-      [/\*[^*]+\*/g, 'tok-string'],
-      [/`[^`]+`/g, 'tok-attribute'],
-      [/^\s*[-*+] /gm, 'tok-keyword'],
-      [/\[[^\]]+\]\([^)]+\)/g, 'tok-type'],
-      [/^>.+/gm, 'tok-comment'],
-      [/^---+$/gm, 'tok-comment'],
-    ]);
-  }
-
-  function highlightObjc(h) {
-    return applyTokens(h, baseRules(
-      ['import','include','interface','implementation','protocol','end',
-        'property','synthesize','dynamic','selector','encode','class',
-        'void','int','float','double','BOOL','YES','NO','nil','NULL',
-        'self','super','return','if','else','for','while','do','switch',
-        'case','break','continue','typedef','enum','struct','id','instancetype'],
-      [
-        [/@"[^"]*"/g, 'tok-string'],
-        [/\[[^\[\]]+\]/g, 'tok-attribute'],
-        [/\b([A-Z][a-zA-Z0-9]*)\b/g, 'tok-type'],
-      ],
-      { hashComments: false }
-    ));
-  }
-
-  function highlightCpp(h) {
-    return applyTokens(h, baseRules(
-      ['include','define','ifdef','ifndef','endif','pragma',
-        'int','float','double','char','bool','void','long','short',
-        'unsigned','signed','struct','class','enum','union','typedef',
-        'return','if','else','for','while','do','switch','case','break',
-        'continue','goto','sizeof','new','delete','nullptr','NULL',
-        'true','false','const','static','extern','inline','virtual',
-        'public','private','protected','namespace','using','template',
-        'auto','decltype','override','final','explicit','operator'],
-      [
-        [/#\w+/g, 'tok-attribute'],
-        [/\b([A-Z_][A-Z0-9_]+)\b/g, 'tok-attribute'],
-        [/::/g, 'tok-type'],
-      ],
-      { hashComments: false }
-    ));
-  }
-
-  function highlightSwift(h) {
-    return applyTokens(h, baseRules(
-      ['import','func','let','var','struct','class','enum','protocol',
-        'extension','return','if','else','guard','for','while','switch',
-        'case','default','break','continue','do','catch','throw','try',
-        'async','await','inout','where','public','private','fileprivate',
-        'internal','open','final','static','mutating','nonmutating',
-        'init','deinit','self','super','nil','true','false'],
-      [
-        [/@\w+/g, 'tok-attribute'],
-        [/\b([A-Z][a-zA-Z0-9]*)\b/g, 'tok-type'],
-      ]
-    ));
-  }
-
-  function highlightPython(h) {
-    return applyTokens(h, baseRules(
-      ['def','class','import','from','as','return','if','elif','else','for',
-        'while','try','except','finally','raise','with','lambda','yield',
-        'async','await','pass','break','continue','in','is','not','and','or',
-        'True','False','None','global','nonlocal'],
-      [
-        [/@\w+/g, 'tok-attribute'],
-        [/\b([A-Z][a-zA-Z0-9_]*)\b/g, 'tok-type'],
-      ]
-    ));
-  }
-
-  function highlightJSON(h) {
-    return applyTokens(h, [
-      [/"([^"\\]|\\.)*"\s*(?=:)/g, 'tok-json-key'],
-      [/"([^"\\]|\\.)*"/g, 'tok-string'],
-      [/\b(true|false|null)\b/g, 'tok-keyword'],
-      [/\b-?\d+(\.\d+)?([eE][+-]?\d+)?\b/g, 'tok-number'],
-    ]);
-  }
-
-  function highlightBash(h) {
-    return applyTokens(h, [
-      [/#(?!include)[^\n]*/g, 'tok-comment'],
-      [/"([^"\\]|\\.)*"|'([^'\\]|\\.)*'/g, 'tok-string'],
-      [/\b(if|then|else|fi|for|in|do|done|while|case|esac|function|return|exit|export|source|alias|unset|local)\b/g, 'tok-keyword'],
-      [/\$\{?[\w]+\}?/g, 'tok-attribute'],
-      [/\b\d+\.?\d*\b/g, 'tok-number'],
-    ]);
-  }
-
-  function highlightRegex(h) {
-    return applyTokens(h, [
-      [/^\/.*\/[gimsuy]*$/gm, 'tok-keyword'],
-      [/\\[wWdDsSbnrtv0]/g, 'tok-attribute'],
-      [/\[[^\]]+\]/g, 'tok-type'],
-      [/\{[0-9,]+\}|\*|\+|\?/g, 'tok-number'],
-    ]);
-  }
-
-  function highlight(code, lang) {
-    let h = String(code || '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
-
-    const map = {
-      swift: highlightSwift,
-      kotlin: highlightKotlin,
-      dart: highlightDart,
-      objc: highlightObjc,
-      javascript: highlightJavaScript,
-      typescript: highlightTypeScript,
-      python: highlightPython,
-      ruby: highlightRuby,
-      go: highlightGo,
-      rust: highlightRust,
-      c: highlightCpp,
-      cpp: highlightCpp,
-      css: highlightCSS,
-      scss: highlightCSS,
-      html: highlightHTML,
-      sql: highlightSQL,
-      graphql: highlightGraphQL,
-      yaml: highlightYAML,
-      toml: highlightTOML,
-      json: highlightJSON,
-      bash: highlightBash,
-      dockerfile: highlightDockerfile,
-      diff: highlightDiff,
-      terminal: highlightTerminal,
-      markdown: highlightMarkdown,
-      regex: highlightRegex,
-    };
-    return (map[lang] || ((x) => x))(h);
-  }
-
-  function isKnownCodeLanguage(lang) {
-    const normalized = String(lang || '').trim().toLowerCase();
-    return Boolean(normalized && normalized !== 'code' && normalized !== 'markdown');
-  }
-
-  function shouldBeCodeBlock(content, explicitLang = '') {
-    const langHint = normalizeLangHint(explicitLang);
-    if (langHint) return true;
-
-    const normalizedContent = String(content || '').replace(/\r\n?/g, '\n').trim();
-    if (!normalizedContent) return false;
-    const lines = normalizedContent.split('\n');
-    const detected = detectLanguage(normalizedContent, '');
-    if (isKnownCodeLanguage(detected)) return true;
-
-    let codeSignals = 0;
-    let proseSignals = 0;
-    lines.forEach((line) => {
-      const raw = String(line || '');
-      const trimmed = raw.trim();
-      if (!trimmed) return;
-
-      if (/[{};=><()[\]]/.test(trimmed) || /=>|::|->/.test(trimmed)) codeSignals += 1;
-      if (/^\s+(func|var|let|const|def|class|if|for|while|return|import)\b/.test(raw)) codeSignals += 1;
-      if (/\b(import|return|if|for|while|switch|case|class|func|def|const|let|var)\b/.test(trimmed)) codeSignals += 1;
-
-      if (/^[–—\-•]\s+[А-ЯA-Z]/.test(trimmed)) proseSignals += 1;
-      if (/^\d+\)\s+[А-ЯA-Z]/.test(trimmed)) proseSignals += 1;
-      if (/^[A-Za-zА-Яа-яЁё0-9_-]{1,40}:\s+(https?:\/\/|www\.|[A-Za-zА-Яа-яЁё].{3,})/.test(trimmed)) proseSignals += 1;
-      if (trimmed.length < 80 && !/[{}()[\];=<>]/.test(trimmed) && !/=>|::|->/.test(trimmed)) proseSignals += 1;
-    });
-
-    if (proseSignals > codeSignals) return false;
-    return codeSignals >= Math.max(2, Math.ceil(lines.length * 0.3));
-  }
-
-  function renderCodeBlockFromText(codeText, hint = '', options = {}) {
-    const code = String(codeText || '').replace(/\s+$/, '');
-    if (!code.trim()) return '';
-    const normalizedHint = normalizeLangHint(hint);
-    const isCode = Boolean(options.forceCode) || shouldBeCodeBlock(code, normalizedHint);
-    const language = isCode ? detectLanguage(code, normalizedHint) : 'code';
-    const displayName = isCode && Object.prototype.hasOwnProperty.call(LANG_DISPLAY, language)
-      ? LANG_DISPLAY[language]
-      : (isCode ? language : '');
-    const highlighted = highlight(code, language);
-    const classes = `code-block${isCode ? ' is-code' : ''}`;
-    return (
-      `<div class="${classes}" data-language="${esc(language)}">`
-      + `<div class="code-block-head">`
-      + `<span class="code-lang">${esc(displayName || '')}</span>`
-      + `<button type="button" class="code-copy-btn" onclick="copyCodeBlock(this)">Copy</button>`
-      + `</div>`
-      + `<pre><code>${highlighted}</code></pre>`
-      + `</div>`
-    );
-  }
-
-  function isLikelyCodeParagraph(paragraph) {
-    return shouldBeCodeBlock(paragraph, '');
-  }
-
-  function formatMessage(text) {
-    const raw = String(text == null ? '' : text).replace(/\r\n?/g, '\n');
-    if (!raw.trim()) return '';
-
-    const chunks = [];
-    const fenceRegex = /```[\s\S]*?```/g;
-    let lastIdx = 0;
-    let match;
-    while ((match = fenceRegex.exec(raw)) !== null) {
-      if (match.index > lastIdx) {
-        chunks.push({ type: 'text', content: raw.slice(lastIdx, match.index) });
-      }
-      chunks.push({ type: 'code', content: match[0] });
-      lastIdx = fenceRegex.lastIndex;
-    }
-    if (lastIdx < raw.length) {
-      chunks.push({ type: 'text', content: raw.slice(lastIdx) });
-    }
-    if (!chunks.length) chunks.push({ type: 'text', content: raw });
-
-    return chunks.map((chunk) => {
-      if (chunk.type === 'code') return renderBasicMarkdown(chunk.content);
-      const paragraphs = String(chunk.content || '')
-        .split(/\n{2,}/)
-        .map((p) => p.replace(/^\n+|\n+$/g, ''))
-        .filter((p) => p.trim().length > 0);
-      if (!paragraphs.length) return '';
-      return paragraphs.map((paragraph) => {
-        const unclosedFence = paragraph.match(/^\s*```([a-zA-Z0-9_+-]*)\s*\n([\s\S]*)$/);
-        if (unclosedFence) {
-          const lang = String(unclosedFence[1] || '').trim();
-          return renderCodeBlockFromText(unclosedFence[2], lang, { forceCode: true });
-        }
-        if (isMarkdownTableParagraph(paragraph)) {
-          return renderBasicMarkdown(paragraph);
-        }
-        if (isLikelyCodeParagraph(paragraph)) {
-          return renderCodeBlockFromText(paragraph);
-        }
-        const lines = paragraph.split('\n').map((line) => line.trim()).filter(Boolean);
-        if (!lines.length) return '';
-        if (lines.some((line) => /^\d+[\).]\s+/.test(line))) {
-          return renderNumberedParagraph(lines);
-        }
-        return renderStructuredLines(lines);
-      }).join('');
     }).join('');
+
+    const previewHtml = questions.map((q) => (
+      `<span class="preview-item" id="prev-${esc(messageId)}-${esc(String(q.index))}">`
+      + `${esc(String(q.index))}:<span class="preview-val">?</span>`
+      + `</span>`
+    )).join('');
+
+    return (
+      `<div class="question-form" id="form-${esc(messageId)}">`
+      + prefixHtml
+      + questionsHtml
+      + `<div class="form-send-bar" id="send-bar-${esc(messageId)}">`
+      + `<div class="form-preview" id="preview-${esc(messageId)}">${previewHtml}</div>`
+      + `<button class="form-send-btn" id="send-btn-${esc(messageId)}" disabled onclick="submitForm('${esc(messageId)}')">Отправить ответы →</button>`
+      + `</div>`
+      + `</div>`
+    );
   }
 
-  async function copyCodeBlock(btn) {
+  function selectFormChip(btn, messageId) {
     const button = btn;
     if (!button) return;
-    const block = button.closest('.code-block');
-    const codeEl = block ? block.querySelector('code') : null;
-    const raw = codeEl ? String(codeEl.textContent || '') : '';
-    if (!raw) return;
-    try {
-      await navigator.clipboard.writeText(raw);
-      button.classList.add('copied');
-      button.textContent = '✓';
-      setTimeout(() => {
-        button.classList.remove('copied');
-        button.textContent = 'Copy';
-      }, 2000);
-    } catch (err) {
-      button.textContent = '×';
-      setTimeout(() => {
-        button.textContent = 'Copy';
-      }, 1200);
+    const chipsGroup = button.closest('.form-chips');
+    if (!chipsGroup) return;
+    chipsGroup.querySelectorAll('.form-chip').forEach((chip) => chip.classList.remove('selected'));
+    button.classList.add('selected');
+
+    const qIndex = String(button.getAttribute('data-q') || button.closest('.form-question')?.getAttribute('data-q') || '').trim();
+    const selectedNum = String(button.getAttribute('data-num') || '').trim();
+    if (!qIndex || !selectedNum) return;
+    if (!formSelections[messageId]) formSelections[messageId] = {};
+    formSelections[messageId][qIndex] = selectedNum;
+    updateFormPreview(messageId);
+  }
+
+  function onFormInput(messageId) {
+    if (!formSelections[messageId]) formSelections[messageId] = {};
+    const form = document.getElementById(`form-${messageId}`);
+    if (!form) return;
+    form.querySelectorAll('.form-text-input').forEach((input) => {
+      const qIndex = String(input.getAttribute('data-q') || '').trim();
+      if (!qIndex) return;
+      const value = String(input.value || '').trim();
+      if (value) formSelections[messageId][qIndex] = value;
+      else delete formSelections[messageId][qIndex];
+    });
+    updateFormPreview(messageId);
+  }
+
+  function updateFormPreview(messageId) {
+    const form = document.getElementById(`form-${messageId}`);
+    if (!form) return;
+    if (!formSelections[messageId]) formSelections[messageId] = {};
+    const selection = formSelections[messageId];
+    let allAnswered = true;
+
+    form.querySelectorAll('.form-question').forEach((questionEl) => {
+      const qIndex = String(questionEl.getAttribute('data-q') || '').trim();
+      if (!qIndex) return;
+      const inputEl = questionEl.querySelector('.form-text-input');
+      let value = '';
+      if (inputEl) {
+        value = String(inputEl.value || '').trim();
+        if (value) selection[qIndex] = value;
+        else delete selection[qIndex];
+      } else {
+        value = String(selection[qIndex] || '').trim();
+      }
+
+      const previewItem = document.getElementById(`prev-${messageId}-${qIndex}`);
+      if (previewItem) {
+        const previewValue = previewItem.querySelector('.preview-val');
+        if (previewValue) previewValue.textContent = value || '?';
+        previewItem.classList.toggle('preview-answered', Boolean(value));
+      }
+      if (!value) allAnswered = false;
+    });
+
+    const sendBtn = document.getElementById(`send-btn-${messageId}`);
+    if (sendBtn) {
+      sendBtn.disabled = !allAnswered;
+      sendBtn.classList.toggle('ready', allAnswered);
     }
+  }
+
+  function submitForm(messageId) {
+    const form = document.getElementById(`form-${messageId}`);
+    if (!form || form.classList.contains('form-submitted')) return;
+    if (!formSelections[messageId]) formSelections[messageId] = {};
+    const selection = formSelections[messageId];
+
+    const parts = [];
+    form.querySelectorAll('.form-question').forEach((questionEl) => {
+      const qIndex = String(questionEl.getAttribute('data-q') || '').trim();
+      if (!qIndex) return;
+      const inputEl = questionEl.querySelector('.form-text-input');
+      const value = inputEl
+        ? String(inputEl.value || '').trim()
+        : String(selection[qIndex] || '').trim();
+      parts.push(`${qIndex}:${value || '?'}`);
+    });
+    const assembled = parts.join(' ');
+
+    const chatInput = document.getElementById('chatInput') || document.getElementById('userInput');
+    if (chatInput) {
+      chatInput.value = assembled;
+      if (typeof autoResize === 'function') autoResize(chatInput);
+    }
+
+    form.classList.add('form-submitted');
+    form.querySelectorAll('.form-chip, .form-text-input').forEach((el) => {
+      el.disabled = true;
+    });
+    const sendBtn = document.getElementById(`send-btn-${messageId}`);
+    if (sendBtn) {
+      sendBtn.disabled = true;
+      sendBtn.classList.remove('ready');
+    }
+
+    if (typeof sendMessage === 'function') sendMessage();
+    else if (typeof sendMsg === 'function') sendMsg();
   }
 
   /* ══════════════════════════════════════════════════════════
@@ -7209,12 +6594,33 @@ textarea::placeholder,
     div.className = `msg ${role}`;
     const name = role === 'user' ? 'Вы' : 'iOS Agent';
     const emoji = role === 'user' ? '👤' : '📱';
+    const bubbleClass = role === 'user' ? 'bubble user' : 'bubble assistant';
     div.innerHTML = `
       <div class="msg-avatar">${emoji}</div>
       <div class="msg-content">
         <div class="msg-name">${name}</div>
-        <div class="bubble">${role === 'bot' ? formatMessage(text) : esc(text)}</div>
+        <div class="${bubbleClass}"></div>
       </div>`;
+    const bubble = div.querySelector('.bubble');
+    if (bubble) {
+      if (role === 'user') {
+        bubble.textContent = String(text || '');
+      } else {
+        const assistantText = String(text || '');
+        const messageId = `msg-${Date.now()}-${++assistantMessageSeq}`;
+        const hasQuestionForm = isQuestionForm(assistantText);
+        bubble.innerHTML = hasQuestionForm
+          ? renderQuestionForm(assistantText, messageId)
+          : renderAssistantMessage(assistantText);
+        if (hasQuestionForm) {
+          updateFormPreview(messageId);
+        }
+        bubble.querySelectorAll('pre code').forEach((block) => {
+          if (window.hljs) hljs.highlightElement(block);
+          addCopyButton(block.closest('pre'));
+        });
+      }
+    }
     box.appendChild(div);
     box.scrollTop = box.scrollHeight;
     return div;

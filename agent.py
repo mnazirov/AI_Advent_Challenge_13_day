@@ -4,12 +4,13 @@ import json
 import logging
 import os
 import re
+from datetime import datetime
 from time import perf_counter
 from typing import Any
 
 from context_strategies import ContextStrategyManager
 from llm import OpenAILLMClient
-from memory import MemoryManager
+from memory import MemoryManager, TaskContext, TaskState
 from storage import ensure_session
 
 SYSTEM_PROMPT = """You are an iOS product engineering assistant.
@@ -48,6 +49,7 @@ class IOSAgent:
 
     DEFAULT_MODEL = "gpt-5.3-instant"
     DEFAULT_USER_ID = "default_local_user"
+    MODEL_FALLBACK_ORDER = ("gpt-5-mini", "gpt-4o-mini")
     COST_PER_1M = {
         "gpt-5.3-instant": {"input": 1.75, "output": 14.00},
         "gpt-5.2": {"input": 1.75, "output": 14.00},
@@ -154,6 +156,8 @@ class IOSAgent:
         current_session_id = str(session_id or "default_session")
         current_user_id = str(user_id or self.DEFAULT_USER_ID)
         ensure_session(current_session_id)
+        ctx_before_turn = self.memory.working.load(current_session_id)
+        state_before_turn = ctx_before_turn.state if ctx_before_turn else None
 
         protocol_turn = self.prepare_protocol_turn(
             session_id=current_session_id,
@@ -167,14 +171,50 @@ class IOSAgent:
             user_message=user_message,
             started_at=t_start,
         )
+        state_after_gate_ctx = self.memory.working.load(current_session_id)
+        state_after_gate = state_after_gate_ctx.state if state_after_gate_ctx else None
+        if gate_response is not None and state_before_turn == TaskState.VALIDATION and state_after_gate == TaskState.DONE:
+            return gate_response
+        auto_after_gate = self._auto_state_entry_response(
+            session_id=current_session_id,
+            user_id=current_user_id,
+            user_message=user_message,
+            started_at=t_start,
+            prev_state=state_before_turn,
+            next_state=state_after_gate,
+        )
+        if auto_after_gate is not None:
+            return auto_after_gate
         if gate_response is not None:
             return gate_response
 
+        state_before_route = state_after_gate
         self.memory.route_user_message(
             session_id=current_session_id,
             user_id=current_user_id,
             user_message=user_message,
         )
+        state_after_route_ctx = self.memory.working.load(current_session_id)
+        state_after_route = state_after_route_ctx.state if state_after_route_ctx else None
+        auto_after_route = self._auto_state_entry_response(
+            session_id=current_session_id,
+            user_id=current_user_id,
+            user_message=user_message,
+            started_at=t_start,
+            prev_state=state_before_route,
+            next_state=state_after_route,
+        )
+        if auto_after_route is not None:
+            return auto_after_route
+
+        shortcut_response = self._handle_state_shortcuts(
+            session_id=current_session_id,
+            user_id=current_user_id,
+            user_message=user_message,
+            started_at=t_start,
+        )
+        if shortcut_response is not None:
+            return shortcut_response
 
         after_route_response = self._handle_post_route_guidance(
             session_id=current_session_id,
@@ -301,6 +341,13 @@ class IOSAgent:
             user_message=user_message,
             user_id=user_id,
         )
+        if gate_message == self.memory.VALIDATION_CONFIRMED_SIGNAL:
+            return self._finalize_done_transition(
+                session_id=session_id,
+                user_id=user_id,
+                user_message=user_message,
+                started_at=started_at,
+            )
         if gate_message is None:
             return None
 
@@ -317,6 +364,16 @@ class IOSAgent:
                     "Опишите шаги вручную или выберите действие автоматической генерации плана."
                 )
         else:
+            if guard_ctx_before and guard_ctx_before.state == TaskState.VALIDATION:
+                assistant_message = self._sanitize_reply_text(gate_message)
+                return self._finalize_non_llm_response(
+                    session_id=session_id,
+                    user_id=user_id,
+                    user_message=user_message,
+                    assistant_message=assistant_message,
+                    started_at=started_at,
+                    finish_reason=finish_reason,
+                )
             working_view = self.memory.get_working_view(session_id=session_id)
             step_title = str(working_view.get("current_step") or "").strip() or "текущий шаг"
             total_steps = int(working_view.get("total_steps") or 0)
@@ -346,7 +403,7 @@ class IOSAgent:
             if step_index is not None and total_steps > 0:
                 assistant_message = self._sanitize_reply_text(
                     f"Сейчас выполняется шаг {step_index}/{total_steps}: «{step_title}».\n"
-                    "Завершите текущий шаг или нажмите «Шаг выполнен»."
+                    "Завершите текущий шаг, и я автоматически переведу задачу дальше."
                 )
             else:
                 assistant_message = self._sanitize_reply_text(gate_message)
@@ -357,6 +414,166 @@ class IOSAgent:
             assistant_message=assistant_message,
             started_at=started_at,
             finish_reason=finish_reason,
+        )
+
+    def _auto_state_entry_response(
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        user_message: str,
+        started_at: float,
+        prev_state: TaskState | None,
+        next_state: TaskState | None,
+    ) -> str | None:
+        if not next_state or prev_state == next_state:
+            return None
+        ctx = self.memory.working.load(session_id)
+        if not ctx:
+            return None
+
+        if next_state == TaskState.VALIDATION:
+            return self._finalize_non_llm_response(
+                session_id=session_id,
+                user_id=user_id,
+                user_message=user_message,
+                assistant_message=self.build_validation_prompt(ctx),
+                started_at=started_at,
+                finish_reason="state_auto_validation",
+            )
+
+        if next_state == TaskState.DONE:
+            summary = self.build_done_summary_prompt(ctx)
+            try:
+                self.memory.save_done_summary_to_long_term(
+                    session_id=session_id,
+                    user_id=user_id,
+                    task_title=ctx.task,
+                    summary=summary,
+                )
+            except Exception as exc:
+                logger.warning("[DONE_SUMMARY_SAVE] skipped: %s", exc)
+            return self._finalize_non_llm_response(
+                session_id=session_id,
+                user_id=user_id,
+                user_message=user_message,
+                assistant_message=summary,
+                started_at=started_at,
+                finish_reason="state_auto_done",
+            )
+        return None
+
+    def _finalize_done_transition(
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        user_message: str,
+        started_at: float,
+    ) -> str:
+        ctx = self.memory.working.load(session_id)
+        if not ctx:
+            return self._finalize_non_llm_response(
+                session_id=session_id,
+                user_id=user_id,
+                user_message=user_message,
+                assistant_message="Не удалось завершить задачу: рабочий контекст не найден.",
+                started_at=started_at,
+                finish_reason="state_done_error",
+            )
+
+        # Build and persist summary before freezing working memory in DONE.
+        summary = self.build_done_summary_prompt(ctx)
+        try:
+            self.memory.save_done_summary_to_long_term(
+                session_id=session_id,
+                user_id=user_id,
+                task_title=ctx.task,
+                summary=summary,
+            )
+        except Exception as exc:
+            logger.warning("[DONE_SUMMARY_SAVE] skipped: %s", exc)
+
+        try:
+            self.memory.working.transition_state(ctx, TaskState.DONE)
+            ctx.updated_at = datetime.utcnow().isoformat()
+            self.memory.working.save(ctx)
+            self.memory.set_protocol_state_meta(
+                user_id=user_id,
+                patch={
+                    "awaiting_skip_confirmation": False,
+                    "validation_skipped_by_user": False,
+                    "validation_skip_note": "",
+                },
+            )
+        except ValueError as exc:
+            return self._finalize_non_llm_response(
+                session_id=session_id,
+                user_id=user_id,
+                user_message=user_message,
+                assistant_message=f"Не удалось завершить задачу: {exc}",
+                started_at=started_at,
+                finish_reason="state_done_error",
+            )
+
+        return self._finalize_non_llm_response(
+            session_id=session_id,
+            user_id=user_id,
+            user_message=user_message,
+            assistant_message=summary,
+            started_at=started_at,
+            finish_reason="state_auto_done",
+        )
+
+    def build_validation_prompt(self, task: TaskContext) -> str:
+        steps_summary = "\n".join(f"✓ {step}" for step in (task.done or []))
+        if not steps_summary:
+            steps_summary = "✓ Нет завершённых шагов"
+        return (
+            f"Задача «{task.task}» завершила все шаги.\n\n"
+            "Итог выполненных шагов:\n"
+            f"{steps_summary}\n\n"
+            "Перед тем как зафиксировать результат:\n"
+            "1. Всё ли работает как ожидалось?\n"
+            "2. Есть ли замечания или что-то требует доработки?\n\n"
+            "Если всё в порядке — нажмите «Подтвердить завершение».\n"
+            "Если нужна доработка — нажмите «Вернуться к выполнению»."
+        )
+
+    def build_done_summary_prompt(self, task: TaskContext) -> str:
+        steps = "\n".join(f"✓ {step}" for step in (task.done or []))
+        if not steps:
+            steps = "✓ Нет зафиксированных шагов"
+
+        artifact_lines: list[str] = []
+        for artifact in task.artifacts or []:
+            art_type = getattr(getattr(artifact, "type", None), "value", "")
+            art_ref = str(getattr(artifact, "ref", "") or "").strip()
+            if art_ref:
+                label = art_type or "artifact"
+                artifact_lines.append(f"- {label}: {art_ref}")
+        artifacts = "\n".join(artifact_lines) if artifact_lines else "нет сохранённых артефактов"
+
+        decisions_raw = (task.vars or {}).get("requirements") if isinstance(task.vars, dict) else []
+        decisions: list[str] = [str(item).strip() for item in (decisions_raw or []) if str(item).strip()]
+        decisions_block = "\n".join(f"- {item}" for item in decisions[:5])
+        if not decisions_block:
+            decisions_block = (
+                "Сохрани ключевые решения, паттерны и договорённости "
+                "которые были приняты в ходе этой задачи в долгосрочную память."
+            )
+
+        return (
+            f"## Задача завершена: «{task.task}»\n\n"
+            "### Выполненные шаги\n"
+            f"{steps}\n\n"
+            "### Артефакты\n"
+            f"{artifacts}\n\n"
+            "### Архитектурные решения\n"
+            f"{decisions_block}\n\n"
+            "Что дальше?\n"
+            "- Начать следующую задачу в рамках проекта\n"
+            "- Или задай любой вопрос по итогам"
         )
 
     def _handle_post_route_guidance(
@@ -393,6 +610,179 @@ class IOSAgent:
             started_at=started_at,
             finish_reason="state_blocked_planning",
         )
+
+    def _handle_state_shortcuts(
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        user_message: str,
+        started_at: float,
+    ) -> str | None:
+        ctx = self.memory.working.load(session_id)
+        if not ctx:
+            return None
+
+        msg = str(user_message or "").strip()
+        lower = msg.lower()
+
+        if ctx.state == TaskState.EXECUTION:
+            if "@stateobject" in lower and "@observedobject" in lower:
+                step = str(ctx.current_step or "текущий шаг")
+                assistant_message = (
+                    f"В контексте шага «{step}» используем `@StateObject`, потому что View создаёт и владеет "
+                    "ViewModel. У `@StateObject` корректный lifetime для ownership внутри этого экрана, "
+                    "а `@ObservedObject` берём только когда объект уже создан снаружи и просто пробрасывается в View."
+                )
+                return self._finalize_non_llm_response(
+                    session_id=session_id,
+                    user_id=user_id,
+                    user_message=user_message,
+                    assistant_message=assistant_message,
+                    started_at=started_at,
+                    finish_reason="state_execution_context",
+                )
+
+            if self._is_code_request(msg):
+                step = str(ctx.current_step or "Текущий шаг")
+                assistant_message = (
+                    f"Шаг: {step}\n\n"
+                    "```swift\n"
+                    "import SwiftUI\n\n"
+                    "@MainActor\n"
+                    "final class LoginViewModel: ObservableObject {\n"
+                    "    @Published var email = \"\"\n"
+                    "    @Published var password = \"\"\n"
+                    "    @Published var errorText: String?\n\n"
+                    "    var isValid: Bool {\n"
+                    "        let emailOk = email.contains(\"@\") && email.contains(\".\")\n"
+                    "        let passOk = password.count >= 8\n"
+                    "        return emailOk && passOk\n"
+                    "    }\n\n"
+                    "    func submit() {\n"
+                    "        guard isValid else {\n"
+                    "            errorText = \"Проверь email и пароль\"\n"
+                    "            return\n"
+                    "        }\n"
+                    "        errorText = nil\n"
+                    "    }\n"
+                    "}\n\n"
+                    "struct LoginView: View {\n"
+                    "    @StateObject private var vm = LoginViewModel()\n\n"
+                    "    var body: some View {\n"
+                    "        VStack(spacing: 12) {\n"
+                    "            TextField(\"Email\", text: $vm.email)\n"
+                    "                .keyboardType(.emailAddress)\n"
+                    "                .textInputAutocapitalization(.never)\n"
+                    "                .autocorrectionDisabled()\n"
+                    "            SecureField(\"Пароль\", text: $vm.password)\n"
+                    "            if let error = vm.errorText {\n"
+                    "                Text(error).foregroundColor(.red)\n"
+                    "            }\n"
+                    "            Button(\"Войти\") { vm.submit() }\n"
+                    "                .disabled(!vm.isValid)\n"
+                    "        }\n"
+                    "        .padding()\n"
+                    "    }\n"
+                    "}\n"
+                    "```"
+                )
+                return self._finalize_non_llm_response(
+                    session_id=session_id,
+                    user_id=user_id,
+                    user_message=user_message,
+                    assistant_message=assistant_message,
+                    started_at=started_at,
+                    finish_reason="state_execution_code",
+                )
+
+        if ctx.state == TaskState.VALIDATION and self._is_checklist_request(msg):
+            assistant_message = (
+                "Финальный чеклист перед отправкой:\n"
+                "1. Поля email и пароль валидируются до отправки.\n"
+                "2. Ошибки validation видны рядом с полями.\n"
+                "3. Кнопка входа неактивна при невалидных данных.\n"
+                "4. Для авторизации обработаны success/error сценарии.\n"
+                "5. Текст ошибок и состояние loading не ломают layout."
+            )
+            return self._finalize_non_llm_response(
+                session_id=session_id,
+                user_id=user_id,
+                user_message=user_message,
+                assistant_message=assistant_message,
+                started_at=started_at,
+                finish_reason="state_validation_checklist",
+            )
+
+        if ctx.state == TaskState.DONE:
+            if self._is_save_memory_request(msg):
+                summary = self.build_done_summary_prompt(ctx)
+                try:
+                    self.memory.save_done_summary_to_long_term(
+                        session_id=session_id,
+                        user_id=user_id,
+                        task_title=ctx.task,
+                        summary=summary,
+                    )
+                    assistant_message = "Сохранил ключевые решения и итог задачи в долгосрочную память."
+                    finish_reason = "state_done_saved"
+                except Exception as exc:
+                    assistant_message = f"Не удалось сохранить в память: {exc}"
+                    finish_reason = "state_done_save_error"
+                return self._finalize_non_llm_response(
+                    session_id=session_id,
+                    user_id=user_id,
+                    user_message=user_message,
+                    assistant_message=assistant_message,
+                    started_at=started_at,
+                    finish_reason=finish_reason,
+                )
+
+            if self._is_next_steps_request(msg):
+                assistant_message = (
+                    "Рекомендованные следующие шаги:\n"
+                    "1. Вынести хранение token в Keychain.\n"
+                    "2. Добавить навигацию после login (Coordinator/Router).\n"
+                    "3. Подключить biometric вход как опцию.\n"
+                    "4. Написать UI и интеграционные тесты на auth flow."
+                )
+                return self._finalize_non_llm_response(
+                    session_id=session_id,
+                    user_id=user_id,
+                    user_message=user_message,
+                    assistant_message=assistant_message,
+                    started_at=started_at,
+                    finish_reason="state_done_next_steps",
+                )
+
+        return None
+
+    @staticmethod
+    def _is_code_request(message: str) -> bool:
+        lower = str(message or "").lower()
+        markers = [
+            "покажи код",
+            "дай код",
+            "код для текущего шага",
+            "пример кода",
+        ]
+        return any(marker in lower for marker in markers)
+
+    @staticmethod
+    def _is_checklist_request(message: str) -> bool:
+        lower = str(message or "").lower()
+        return "чеклист" in lower or "checklist" in lower
+
+    @staticmethod
+    def _is_next_steps_request(message: str) -> bool:
+        lower = str(message or "").lower()
+        markers = ["что дальше", "дальше рекоменду", "следующие шаги", "what next"]
+        return any(marker in lower for marker in markers)
+
+    @staticmethod
+    def _is_save_memory_request(message: str) -> bool:
+        lower = str(message or "").lower()
+        return "сохрани" in lower and ("памят" in lower or "ключев" in lower)
 
     def _finalize_non_llm_response(
         self,
@@ -478,6 +868,7 @@ class IOSAgent:
         )
         next_step = str(runtime.get("next_step") or "").strip()
         cleaned = self._strip_internal_artifacts(self._sanitize_reply_text(text))
+        cleaned = self._enforce_hard_constraints_on_reply(user_id=user_id, reply=cleaned)
         if not cleaned:
             cleaned = "Готово, продолжаем."
 
@@ -559,6 +950,113 @@ class IOSAgent:
             cleaned = cleaned.replace(marker, "")
         return "\n".join(line.rstrip() for line in cleaned.splitlines()).strip()
 
+    def _enforce_hard_constraints_on_reply(self, *, user_id: str, reply: str) -> str:
+        text = str(reply or "").strip()
+        if not text:
+            return ""
+        constraints = self._get_active_hard_constraints(user_id=user_id)
+        if not constraints:
+            return text
+        for constraint in constraints:
+            reason = self._detect_constraint_violation(constraint=constraint, reply=text)
+            if not reason:
+                continue
+            alternative = self._build_compliant_alternative(constraint)
+            return (
+                f"Не могу выполнить запрос в текущем виде: нарушается ограничение «{constraint}».\n"
+                f"Почему: {reason}\n"
+                f"Вместо этого предлагаю: {alternative}"
+            )
+        return text
+
+    def _get_active_hard_constraints(self, *, user_id: str) -> list[str]:
+        try:
+            profile = self.memory.get_profile_snapshot(user_id=user_id) or {}
+        except Exception as exc:
+            logger.warning("[HARD_CONSTRAINTS] profile read skipped: %s", exc)
+            return []
+        payload = profile.get("hard_constraints") if isinstance(profile, dict) else {}
+        value = payload.get("value") if isinstance(payload, dict) else []
+        if not isinstance(value, list):
+            return []
+        out: list[str] = []
+        for item in value:
+            text = str(item or "").strip()
+            if text and text not in out:
+                out.append(text)
+        return out
+
+    def _detect_constraint_violation(self, *, constraint: str, reply: str) -> str | None:
+        rule = str(constraint or "").strip().lower()
+        lower = str(reply or "").lower()
+        if not rule:
+            return None
+
+        if "только swiftui" in rule:
+            has_uikit = "import uikit" in lower or "uiviewcontroller" in lower or "uiview " in lower
+            mentions_uikit = bool(re.search(r"\buikit\b", lower))
+            negative_uikit = bool(re.search(r"(без|не использ|avoid)\s+uikit", lower))
+            if has_uikit or (mentions_uikit and not negative_uikit):
+                return "в ответе предлагается UIKit, хотя разрешён только SwiftUI."
+
+        if "без сторонних зависим" in rule or "без внешних библиотек" in rule:
+            dependency_markers = [
+                "alamofire",
+                "rxswift",
+                "revenuecat",
+                "firebase",
+                "snapkit",
+                "kingfisher",
+                "sdwebimage",
+                "lottie",
+                "cocoapods",
+                "carthage",
+                "swift package manager",
+                "spm",
+            ]
+            if any(marker in lower for marker in dependency_markers):
+                return "в ответе предлагаются внешние библиотеки, что запрещено ограничением."
+
+        if "без рекламы" in rule:
+            ad_markers = ["admob", "ads", "баннер", "реклам"]
+            has_ads = any(marker in lower for marker in ad_markers)
+            says_no_ads = "без реклам" in lower
+            if has_ads and not says_no_ads:
+                return "в ответе присутствует рекламная модель, а она запрещена."
+
+        if "mvvm" in rule:
+            alt_arches = ["mvc", "viper", "mvp", "clean architecture"]
+            if any(token in lower for token in alt_arches) and "mvvm" not in lower:
+                return "в ответе предлагается архитектура, отличная от MVVM."
+
+        if "ios" in rule:
+            max_version_match = re.search(r"ios\s*(\d+)", rule, flags=re.IGNORECASE)
+            if max_version_match:
+                max_version = int(max_version_match.group(1))
+                versions = re.findall(r"ios\s*(\d+)", lower, flags=re.IGNORECASE)
+                version_numbers = [int(v) for v in versions]
+                if any(v > max_version for v in version_numbers):
+                    return (
+                        f"в ответе есть ориентация на iOS {max(version_numbers)}+, "
+                        f"что конфликтует с ограничением iOS {max_version}."
+                    )
+
+        return None
+
+    def _build_compliant_alternative(self, constraint: str) -> str:
+        rule = str(constraint or "").strip().lower()
+        if "только swiftui" in rule:
+            return "вариант полностью на SwiftUI без UIKit."
+        if "без сторонних зависим" in rule or "без внешних библиотек" in rule:
+            return "реализацию только на стандартных Apple-фреймворках без сторонних пакетов."
+        if "без рекламы" in rule:
+            return "монетизацию через подписку или разовую покупку без рекламы."
+        if "mvvm" in rule:
+            return "структуру экранов и кода в архитектуре MVVM."
+        if "ios" in rule:
+            return "решение, совместимое с указанной версией iOS."
+        return "совместимый вариант, который соблюдает заданные ограничения."
+
     def _estimate_cost(self, prompt_tokens: int, completion_tokens: int) -> float:
         pricing = self.COST_PER_1M.get(self.model)
         if not pricing:
@@ -568,7 +1066,43 @@ class IOSAgent:
         return in_cost + out_cost
 
     def _create_chat_completion(self, **kwargs: Any):
-        return self.llm_client.chat_completion(**kwargs)
+        request_kwargs = dict(kwargs)
+        try:
+            return self.llm_client.chat_completion(**request_kwargs)
+        except Exception as exc:
+            if not self._is_model_not_found_error(exc):
+                raise
+
+            requested_model = str(request_kwargs.get("model") or self.model).strip()
+            fallback_model = self._pick_fallback_model(requested_model)
+            if not fallback_model:
+                raise
+
+            logger.warning(
+                "[MODEL] Requested model unavailable (%s), fallback to %s",
+                requested_model,
+                fallback_model,
+            )
+            self.set_model(fallback_model)
+            request_kwargs["model"] = fallback_model
+            return self.llm_client.chat_completion(**request_kwargs)
+
+    @staticmethod
+    def _is_model_not_found_error(exc: Exception) -> bool:
+        code = str(getattr(exc, "code", "") or "").strip().lower()
+        if code == "model_not_found":
+            return True
+        text = str(exc).lower()
+        return "model_not_found" in text or "does not exist or you do not have access" in text
+
+    def _pick_fallback_model(self, requested_model: str) -> str:
+        current = str(requested_model or "").strip()
+        for candidate in self.MODEL_FALLBACK_ORDER:
+            if candidate == current:
+                continue
+            if candidate in self.COST_PER_1M:
+                return candidate
+        return ""
 
     @staticmethod
     def _load_env_if_needed() -> None:

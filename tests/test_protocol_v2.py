@@ -6,6 +6,8 @@ from uuid import uuid4
 import storage
 from agent import IOSAgent
 from memory.manager import MemoryManager
+from memory.models import ProfileSource
+from memory.protocol import PROTOCOL_PROFILE_KEY
 
 
 class ProtocolV2Tests(unittest.TestCase):
@@ -75,6 +77,109 @@ class ProtocolV2Tests(unittest.TestCase):
         self.assertTrue(bool(profile.get("monetization_model")))
         report = runtime.get("invariant_report") or {}
         self.assertIn("overall_status", report)
+
+    def test_canonical_profile_sync_is_applied_after_protocol_turn(self):
+        runtime = self.memory.prepare_protocol_turn(
+            session_id=self.session_id,
+            user_id=self.user_id,
+            user_message=(
+                "Я новичок. Делаю приложение для бегунов. "
+                "Целевая аудитория: начинающие бегуны. "
+                "Стек SwiftUI. Монетизация: подписка."
+            ),
+        )
+        profile = self.memory.get_profile_snapshot(user_id=self.user_id, session_id=self.session_id)
+        stack_tools = (profile.get("stack_tools") or {}).get("value") or []
+        hard_constraints = (profile.get("hard_constraints") or {}).get("value") or []
+        project_context = (profile.get("project_context") or {}).get("value") or {}
+        sync_meta = runtime.get("canonical_sync") or {}
+
+        self.assertEqual((profile.get("user_role_level") or {}).get("value"), "новичок")
+        self.assertIn("Swift", stack_tools)
+        self.assertIn("SwiftUI", stack_tools)
+        self.assertTrue(any(str(item).startswith("Монетизация:") for item in hard_constraints))
+        self.assertTrue(any(str(item).startswith("ЦА:") for item in hard_constraints))
+        self.assertTrue(bool(str(project_context.get("project_name") or "").strip()))
+        self.assertEqual(sync_meta.get("status"), "updated")
+        self.assertIn("user_role_level", sync_meta.get("updated_fields") or [])
+
+    def test_verified_field_is_not_overwritten_and_conflict_is_recorded(self):
+        self.memory.long_term.update_profile_field(
+            user_id=self.user_id,
+            field="user_role_level",
+            value="продвинутый",
+            source=ProfileSource.USER_EXPLICIT,
+            verified=True,
+        )
+        runtime = self.memory.prepare_protocol_turn(
+            session_id=self.session_id,
+            user_id=self.user_id,
+            user_message="Я новичок. Хочу приложение для бегунов.",
+        )
+        profile = self.memory.get_profile_snapshot(user_id=self.user_id, session_id=self.session_id)
+        conflicts = profile.get("conflicts") or []
+        sync_meta = runtime.get("canonical_sync") or {}
+
+        self.assertEqual((profile.get("user_role_level") or {}).get("value"), "продвинутый")
+        self.assertTrue(any(str(item.get("field") or "") == "user_role_level" for item in conflicts if isinstance(item, dict)))
+        self.assertIn("user_role_level", sync_meta.get("conflict_fields") or [])
+
+    def test_repeated_sync_is_idempotent(self):
+        first = self.memory.prepare_protocol_turn(
+            session_id=self.session_id,
+            user_id=self.user_id,
+            user_message="Я новичок. Делаю приложение для бегунов с подпиской на SwiftUI.",
+        )
+        first_profile = self.memory.get_profile_snapshot(user_id=self.user_id, session_id=self.session_id)
+        first_role_updated = str((first_profile.get("user_role_level") or {}).get("updated_at") or "")
+        protocol_sync_events_before = [
+            e
+            for e in self.memory.get_recent_write_events(session_id=self.session_id, limit=20)
+            if str(e.get("source") or "") == "protocol_sync"
+        ]
+
+        second = self.memory.prepare_protocol_turn(
+            session_id=self.session_id,
+            user_id=self.user_id,
+            user_message="Ок, продолжаем.",
+        )
+        second_profile = self.memory.get_profile_snapshot(user_id=self.user_id, session_id=self.session_id)
+        second_role_updated = str((second_profile.get("user_role_level") or {}).get("updated_at") or "")
+        protocol_sync_events_after = [
+            e
+            for e in self.memory.get_recent_write_events(session_id=self.session_id, limit=20)
+            if str(e.get("source") or "") == "protocol_sync"
+        ]
+
+        self.assertEqual(first.get("canonical_sync", {}).get("status"), "updated")
+        self.assertEqual(second.get("canonical_sync", {}).get("status"), "no_changes")
+        self.assertEqual(first_role_updated, second_role_updated)
+        self.assertEqual(len(protocol_sync_events_before), len(protocol_sync_events_after))
+
+    def test_lazy_backfill_syncs_existing_protocol_profile_on_snapshot(self):
+        self.memory.long_term.add_profile_extra_field(
+            user_id=self.user_id,
+            field=PROTOCOL_PROFILE_KEY,
+            value={
+                "experience_level": "новичок",
+                "app_idea": "Приложение для изучения слов",
+                "target_audience": "студенты",
+                "stack": "Swift + SwiftUI",
+                "monetization_model": "подписка",
+                "current_progress": "Собран экран онбординга",
+                "updated_at": "2026-03-05T00:00:00",
+            },
+            source=ProfileSource.USER_EXPLICIT,
+        )
+        profile = self.memory.get_profile_snapshot(user_id=self.user_id, session_id=self.session_id)
+        hard_constraints = (profile.get("hard_constraints") or {}).get("value") or []
+        project_context = (profile.get("project_context") or {}).get("value") or {}
+        key_decisions = project_context.get("key_decisions") or []
+
+        self.assertEqual((profile.get("user_role_level") or {}).get("value"), "новичок")
+        self.assertIn("Swift", (profile.get("stack_tools") or {}).get("value") or [])
+        self.assertTrue(any(str(item).startswith("Монетизация:") for item in hard_constraints))
+        self.assertTrue(any(str(item).startswith("Текущий прогресс:") for item in key_decisions))
 
     def test_internal_tags_are_removed_from_user_text(self):
         agent = IOSAgent.__new__(IOSAgent)

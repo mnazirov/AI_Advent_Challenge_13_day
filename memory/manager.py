@@ -25,6 +25,8 @@ MAX_WRITE_EVENTS = 50
 
 
 class MemoryManager:
+    VALIDATION_CONFIRMED_SIGNAL = "__VALIDATION_CONFIRMED__"
+
     def __init__(
         self,
         short_term_limit: int = 30,
@@ -127,7 +129,12 @@ class MemoryManager:
             )
         return deleted
 
-    def get_profile_snapshot(self, *, user_id: str) -> dict:
+    def get_profile_snapshot(self, *, user_id: str, session_id: str | None = None) -> dict:
+        self._sync_protocol_profile_to_canonical(
+            user_id=user_id,
+            reason="lazy_backfill_profile_read",
+            session_id=session_id,
+        )
         return self.long_term.get_profile(user_id=user_id)
 
     def ensure_protocol_profile(self, *, user_id: str) -> dict:
@@ -162,11 +169,114 @@ class MemoryManager:
         return self.protocol.evaluate_invariants(run_external=run_external)
 
     def prepare_protocol_turn(self, *, session_id: str, user_id: str, user_message: str) -> dict:
-        return self.protocol.prepare_turn(
+        runtime = self.protocol.prepare_turn(
             session_id=session_id,
             user_id=user_id,
             user_message=user_message,
         )
+        runtime["canonical_sync"] = self._sync_protocol_profile_to_canonical(
+            user_id=user_id,
+            reason="prepare_protocol_turn",
+            session_id=session_id,
+        )
+        return runtime
+
+    def _sync_protocol_profile_to_canonical(
+        self,
+        *,
+        user_id: str,
+        reason: str,
+        session_id: str | None,
+    ) -> dict:
+        snapshot = self.protocol.ensure_protocol_profile(user_id=user_id)
+        protocol_profile = dict(snapshot.get("protocol_profile") or {})
+        current_profile = self.long_term.get_profile(user_id=user_id) or {}
+        patch = self.protocol.build_canonical_patch(
+            protocol_profile=protocol_profile,
+            current_profile=current_profile,
+        )
+
+        updated_fields: list[str] = []
+        conflict_fields: list[str] = []
+        skipped_fields: list[str] = []
+        errors: dict[str, str] = {}
+
+        for field, payload in patch.items():
+            value = payload.get("value") if isinstance(payload, dict) else None
+            confidence_raw = payload.get("confidence") if isinstance(payload, dict) else None
+            try:
+                confidence = float(confidence_raw or 0.0)
+            except Exception:
+                confidence = 0.0
+            if confidence <= 0.0:
+                skipped_fields.append(field)
+                continue
+
+            field_payload = current_profile.get(field) if isinstance(current_profile, dict) else {}
+            current_value = field_payload.get("value") if isinstance(field_payload, dict) else None
+            if self._profile_values_equal(field=field, left=current_value, right=value):
+                skipped_fields.append(field)
+                continue
+
+            if self._has_open_conflict(
+                profile=current_profile,
+                field=field,
+                existing_value=current_value,
+                inferred_value=value,
+            ):
+                skipped_fields.append(field)
+                continue
+
+            try:
+                status = self.long_term.update_profile_field(
+                    user_id=user_id,
+                    field=field,
+                    value=value,
+                    source=ProfileSource.AGENT_INFERRED,
+                    confidence=confidence,
+                    verified=False,
+                )
+            except Exception as exc:
+                errors[field] = str(exc)
+                logger.warning("[PROFILE_SYNC_SKIP] field=%s reason=%s", field, exc)
+                continue
+
+            if status == "updated":
+                updated_fields.append(field)
+                current_profile = self.long_term.get_profile(user_id=user_id) or current_profile
+            elif status == "conflict_recorded":
+                conflict_fields.append(field)
+                current_profile = self.long_term.get_profile(user_id=user_id) or current_profile
+            else:
+                skipped_fields.append(field)
+
+        keys_to_record = list(dict.fromkeys(updated_fields + conflict_fields + (["conflicts"] if conflict_fields else [])))
+        if session_id and keys_to_record:
+            self._record_write_event(
+                session_id=session_id,
+                layer="long_term.profile",
+                keys=keys_to_record,
+                operation="save",
+                source="protocol_sync",
+            )
+
+        if updated_fields:
+            status = "updated"
+        elif conflict_fields:
+            status = "conflict_recorded"
+        elif errors:
+            status = "failed"
+        else:
+            status = "no_changes"
+
+        return {
+            "status": status,
+            "reason": str(reason or ""),
+            "updated_fields": updated_fields,
+            "conflict_fields": conflict_fields,
+            "skipped_fields": skipped_fields,
+            "errors": errors,
+        }
 
     def debug_update_profile_field(
         self,
@@ -198,7 +308,7 @@ class MemoryManager:
             operation="save",
             source="debug_menu",
         )
-        return self.get_profile_snapshot(user_id=user_id)
+        return self.get_profile_snapshot(user_id=user_id, session_id=session_id)
 
     def debug_delete_profile_field(self, *, session_id: str, user_id: str, field: str) -> dict:
         self.long_term.delete_profile_field(user_id=user_id, field=field)
@@ -209,7 +319,7 @@ class MemoryManager:
             operation="delete",
             source="debug_menu",
         )
-        return self.get_profile_snapshot(user_id=user_id)
+        return self.get_profile_snapshot(user_id=user_id, session_id=session_id)
 
     def debug_add_profile_extra_field(
         self,
@@ -232,7 +342,7 @@ class MemoryManager:
             operation="save",
             source="debug_menu",
         )
-        return self.get_profile_snapshot(user_id=user_id)
+        return self.get_profile_snapshot(user_id=user_id, session_id=session_id)
 
     def debug_confirm_profile_field(self, *, session_id: str, user_id: str, field: str) -> dict:
         self.long_term.confirm_profile_field(user_id=user_id, field=field)
@@ -243,7 +353,7 @@ class MemoryManager:
             operation="save",
             source="debug_menu",
         )
-        return self.get_profile_snapshot(user_id=user_id)
+        return self.get_profile_snapshot(user_id=user_id, session_id=session_id)
 
     def debug_resolve_profile_conflict(
         self,
@@ -267,7 +377,7 @@ class MemoryManager:
             operation="save",
             source="debug_menu",
         )
-        return self.get_profile_snapshot(user_id=user_id)
+        return self.get_profile_snapshot(user_id=user_id, session_id=session_id)
 
     def hydrate_short_term(self, session_id: str, messages: list[dict[str, str]]) -> None:
         self.short_term.hydrate(session_id=session_id, messages=messages)
@@ -357,13 +467,7 @@ class MemoryManager:
                 return "Проверка ещё не завершена. Пропустить этот этап и перейти дальше? Ответьте yes или no."
 
             if all_steps_done:
-                if self._is_validation_request(msg):
-                    try:
-                        self.working.request_validation(session_id)
-                        return "Отлично, переходим к финальной проверке результата."
-                    except ValueError as exc:
-                        return str(exc)
-                if self._is_validation_skip_request(msg) or self._is_done_confirmation(msg):
+                if self._is_validation_skip_request(msg):
                     vars_patch["awaiting_validation_skip_confirmation"] = True
                     self.working.update(session_id, vars=vars_patch)
                     if user_id:
@@ -372,7 +476,11 @@ class MemoryManager:
                             patch={"awaiting_skip_confirmation": True},
                         )
                     return "Все шаги готовы. Нужна финальная проверка. Пропустить её и завершить? Ответьте yes или no."
-                return "Все шаги выполнены. Теперь либо запускаем финальную проверку, либо подтверждаем пропуск: yes/no."
+                try:
+                    self.working.request_validation(session_id)
+                    return None
+                except ValueError as exc:
+                    return str(exc)
 
             if self._is_validation_skip_request(msg):
                 return "Пропуск финальной проверки возможен только после завершения всех шагов плана."
@@ -392,24 +500,11 @@ class MemoryManager:
             )
 
         if ctx.state == TaskState.VALIDATION:
-            if self._is_done_confirmation(msg):
-                try:
-                    self.working.transition_state(ctx, TaskState.DONE)
-                    ctx.updated_at = datetime.utcnow().isoformat()
-                    self.working.save(ctx)
-                    if user_id:
-                        self.set_protocol_state_meta(
-                            user_id=user_id,
-                            patch={
-                                "awaiting_skip_confirmation": False,
-                                "validation_skipped_by_user": False,
-                                "validation_skip_note": "",
-                            },
-                        )
-                    return "Отлично, задача завершена."
-                except ValueError as exc:
-                    return str(exc)
-            if self._is_reexecution_request(msg):
+            if "чеклист" in msg or "checklist" in msg:
+                return None
+            if self._is_validation_confirm_message(msg):
+                return self.VALIDATION_CONFIRMED_SIGNAL
+            if self._is_validation_reject_message(msg):
                 try:
                     self.working.transition_state(ctx, TaskState.EXECUTION)
                     ctx.updated_at = datetime.utcnow().isoformat()
@@ -417,10 +512,13 @@ class MemoryManager:
                 except ValueError as exc:
                     return str(exc)
                 return None
-            return "Проверьте результат и подтвердите завершение, либо вернитесь к доработке."
+            logger.info(
+                "[STATE_AUTO] VALIDATION -> DONE (implicit confirmation, no rejection detected)"
+            )
+            return self.VALIDATION_CONFIRMED_SIGNAL
 
         if ctx.state == TaskState.DONE:
-            return "Текущая задача уже завершена. Можно начать новую."
+            return None
         return None
 
     def get_working_view(self, *, session_id: str) -> dict:
@@ -451,85 +549,37 @@ class MemoryManager:
         }
 
     def get_working_actions(self, *, session_id: str) -> list[dict]:
-        ctx = self.working.load(session_id)
-        state = ctx.state if ctx else TaskState.PLANNING
-
-        if state == TaskState.PLANNING:
-            return [
-                {
-                    "id": "auto_plan",
-                    "label": "Сформировать план автоматически",
-                    "kind": "message",
-                    "message": "Сформируй план задачи автоматически на основе цели",
-                },
-                {
-                    "id": "plan_approved",
-                    "label": "План утверждён",
-                    "kind": "message",
-                    "message": "План утверждён",
-                },
-                {
-                    "id": "clarify_goal",
-                    "label": "Уточнить цель задачи",
-                    "kind": "message",
-                    "message": "Давай уточним цель задачи перед планированием",
-                },
-            ]
-
-        if state == TaskState.EXECUTION:
-            return [
-                {
-                    "id": "complete_step",
-                    "label": "Шаг выполнен",
-                    "kind": "message",
-                    "message": "Текущий шаг выполнен, переходим к следующему",
-                },
-                {
-                    "id": "show_status",
-                    "label": "Статус задачи",
-                    "kind": "message",
-                    "message": "Покажи текущий статус и прогресс задачи",
-                },
-                {
-                    "id": "skip_validation",
-                    "label": "Пропустить VALIDATION",
-                    "kind": "message",
-                    "message": "Пропустить validation",
-                },
-            ]
-
-        if state == TaskState.VALIDATION:
-            return [
-                {
-                    "id": "confirm_done",
-                    "label": "Подтвердить завершение",
-                    "kind": "message",
-                    "message": "Подтверждаю выполнение задачи, переходим к итогам",
-                },
-                {
-                    "id": "back_to_execution",
-                    "label": "Вернуться к выполнению",
-                    "kind": "message",
-                    "message": "Нужно доработать, возвращаемся к выполнению",
-                },
-            ]
-
-        if state == TaskState.DONE:
-            return [
-                {
-                    "id": "new_task",
-                    "label": "Начать новую задачу",
-                    "kind": "client_action",
-                    "client_action": "reset_chat",
-                },
-                {
-                    "id": "save_results",
-                    "label": "Сохранить итоги в память",
-                    "kind": "message",
-                    "message": "Сохрани ключевые решения и итоги задачи в долгосрочную память",
-                },
-            ]
+        del session_id
         return []
+
+    def save_done_summary_to_long_term(
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        task_title: str,
+        summary: str,
+    ) -> None:
+        text = (
+            f"Итоги завершённой задачи: {str(task_title or '').strip() or 'Текущая задача'}\n\n"
+            f"{str(summary or '').strip()}"
+        ).strip()
+        if not text:
+            return
+        self.long_term.add_note(
+            user_id=user_id,
+            text=text,
+            tags=["task_summary", "architecture_decisions"],
+            source="assistant_confirmed",
+            ttl_days=180,
+        )
+        self._record_write_event(
+            session_id=session_id,
+            layer="long_term.note",
+            keys=["task_summary", "architecture_decisions"],
+            operation="save",
+            source="agent_done_summary",
+        )
 
     def stats(self, *, session_id: str, user_id: str) -> dict:
         working = self.working.load(session_id)
@@ -555,6 +605,66 @@ class MemoryManager:
             "memory_read": read_meta,
             "recent_writes": len(self.get_recent_write_events(session_id=session_id, limit=10)),
         }
+
+    def _profile_values_equal(self, *, field: str, left: object, right: object) -> bool:
+        return self._normalize_profile_value(field=field, value=left) == self._normalize_profile_value(field=field, value=right)
+
+    def _normalize_profile_value(self, *, field: str, value: object) -> object:
+        if field in {"stack_tools", "hard_constraints"}:
+            return self._normalize_text_list(value)
+        if field in {"response_style", "user_role_level"}:
+            return str(value or "").strip()
+        if field == "project_context":
+            return self._normalize_project_context_value(value)
+        return value
+
+    @staticmethod
+    def _normalize_text_list(value: object) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        out: list[str] = []
+        for item in value:
+            text = str(item or "").strip()
+            if text and text not in out:
+                out.append(text)
+        return out
+
+    def _normalize_project_context_value(self, value: object) -> dict:
+        if isinstance(value, dict):
+            source = value
+        else:
+            source = {}
+        goals = self._normalize_text_list(source.get("goals")) if isinstance(source, dict) else []
+        decisions = self._normalize_text_list(source.get("key_decisions")) if isinstance(source, dict) else []
+        return {
+            "project_name": str(source.get("project_name") or "").strip() if isinstance(source, dict) else "",
+            "goals": goals,
+            "key_decisions": decisions,
+        }
+
+    def _has_open_conflict(
+        self,
+        *,
+        profile: dict,
+        field: str,
+        existing_value: object,
+        inferred_value: object,
+    ) -> bool:
+        conflicts = profile.get("conflicts") if isinstance(profile, dict) else []
+        if not isinstance(conflicts, list):
+            return False
+        normalized_existing = self._normalize_profile_value(field=field, value=existing_value)
+        normalized_inferred = self._normalize_profile_value(field=field, value=inferred_value)
+        for conflict in conflicts:
+            if not isinstance(conflict, dict):
+                continue
+            if str(conflict.get("field") or "") != field:
+                continue
+            conflict_existing = self._normalize_profile_value(field=field, value=conflict.get("existing_value"))
+            conflict_inferred = self._normalize_profile_value(field=field, value=conflict.get("inferred_value"))
+            if conflict_existing == normalized_existing and conflict_inferred == normalized_inferred:
+                return True
+        return False
 
     def _record_write_event(
         self,
@@ -730,13 +840,11 @@ class MemoryManager:
         ]
         return any(trigger in msg for trigger in triggers)
 
-    def _is_done_confirmation(self, msg: str) -> bool:
-        triggers = ["подтверждаю завершение", "завершаем", "переведи в done", "confirm done", "done"]
-        return any(trigger in msg for trigger in triggers)
+    def _is_validation_confirm_message(self, msg: str) -> bool:
+        return any(trigger in msg for trigger in self.router.VALIDATION_CONFIRM_PATTERNS)
 
-    def _is_reexecution_request(self, msg: str) -> bool:
-        triggers = ["верни в execution", "вернуться к шагам", "переисполн", "redo", "rollback"]
-        return any(trigger in msg for trigger in triggers)
+    def _is_validation_reject_message(self, msg: str) -> bool:
+        return any(trigger in msg for trigger in self.router.VALIDATION_REJECT_PATTERNS)
 
     def _is_validation_skip_request(self, msg: str) -> bool:
         triggers = ["пропусти validation", "skip validation", "без validation", "пропустить validation"]
@@ -751,22 +859,4 @@ class MemoryManager:
         return normalized in {"no", "n", "нет", "отмена", "не подтверждаю"}
 
     def _is_execution_allowed_message(self, msg: str, current_step: str) -> bool:
-        if not msg:
-            return False
-        step_lower = current_step.lower()
-        allowed_markers = [
-            "текущий шаг",
-            "шаг выполнен",
-            "выполнил",
-            "выполнено",
-            "артефакт",
-            "статус",
-            "progress",
-            "done",
-            "completed",
-            "код",
-            "реализуй",
-        ]
-        if step_lower and step_lower in msg:
-            return True
-        return any(marker in msg for marker in allowed_markers)
+        return self.router.is_execution_allowed_message(text=msg, current_step=current_step)

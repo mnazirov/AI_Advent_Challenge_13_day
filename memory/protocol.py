@@ -84,6 +84,83 @@ class ProtocolCoordinator:
             "bootstrap_required": False,
         }
 
+    def build_canonical_patch(
+        self,
+        *,
+        protocol_profile: dict[str, Any],
+        current_profile: dict[str, Any] | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        current = dict(current_profile or {})
+        patch: dict[str, dict[str, Any]] = {}
+
+        experience_raw = str((protocol_profile or {}).get("experience_level") or "").strip()
+        role_level = self._map_experience_to_user_role(experience_raw)
+        if role_level:
+            patch["user_role_level"] = {"value": role_level, "confidence": 0.92}
+
+        response_style = self._derive_response_style(experience_raw)
+        if response_style:
+            patch["response_style"] = {"value": response_style, "confidence": 0.84}
+
+        stack = str((protocol_profile or {}).get("stack") or "").strip()
+        stack_tools = self._parse_stack_tools(stack)
+        if stack_tools:
+            patch["stack_tools"] = {"value": stack_tools, "confidence": 0.92}
+
+        hard_constraints = self._extract_profile_list_field(current, field="hard_constraints")
+        hard_confidence = 0.0
+        explicit_constraints = self._normalize_constraints_list((protocol_profile or {}).get("hard_constraints"))
+        if explicit_constraints:
+            hard_constraints = self._merge_unique_lines(base=hard_constraints, incoming=explicit_constraints)
+            hard_confidence = max(hard_confidence, 0.93)
+
+        monetization = str((protocol_profile or {}).get("monetization_model") or "").strip()
+        if monetization:
+            hard_constraints = self._upsert_prefixed_line(
+                lines=hard_constraints,
+                prefix="Монетизация:",
+                value=monetization,
+            )
+            hard_confidence = max(hard_confidence, 0.90)
+
+        audience = str((protocol_profile or {}).get("target_audience") or "").strip()
+        if audience:
+            hard_constraints = self._upsert_prefixed_line(
+                lines=hard_constraints,
+                prefix="ЦА:",
+                value=audience,
+            )
+            hard_confidence = max(hard_confidence, 0.88)
+
+        if hard_constraints and hard_confidence > 0.0:
+            patch["hard_constraints"] = {"value": hard_constraints, "confidence": hard_confidence}
+
+        project_context = self._normalize_project_context_payload(
+            (current.get("project_context") or {}).get("value")
+        )
+        project_confidence = 0.0
+
+        app_idea = str((protocol_profile or {}).get("app_idea") or "").strip()
+        if app_idea:
+            project_context["project_name"] = app_idea
+            project_confidence = max(project_confidence, 0.88)
+
+        current_progress = str((protocol_profile or {}).get("current_progress") or "").strip()
+        if current_progress:
+            key_decisions = [str(x) for x in (project_context.get("key_decisions") or [])]
+            key_decisions = self._upsert_prefixed_line(
+                lines=key_decisions,
+                prefix="Текущий прогресс:",
+                value=current_progress,
+            )
+            project_context["key_decisions"] = key_decisions
+            project_confidence = max(project_confidence, 0.85)
+
+        if project_confidence > 0.0:
+            patch["project_context"] = {"value": project_context, "confidence": project_confidence}
+
+        return patch
+
     def prepare_turn(self, *, session_id: str, user_id: str, user_message: str) -> dict[str, Any]:
         del session_id
         snapshot = self.ensure_protocol_profile(user_id=user_id)
@@ -310,6 +387,11 @@ class ProtocolCoordinator:
         if audience:
             patch["target_audience"] = audience
 
+        hard_constraints = self._detect_hard_constraints(text=text, lower=lower)
+        if hard_constraints:
+            existing = self._normalize_constraints_list(current_profile.get("hard_constraints"))
+            patch["hard_constraints"] = self._merge_unique_lines(base=existing, incoming=hard_constraints)
+
         if self._looks_like_progress_update(lower):
             patch["current_progress"] = text[:220]
 
@@ -514,6 +596,35 @@ class ProtocolCoordinator:
         ]
         return any(token in lower_text for token in tokens)
 
+    @staticmethod
+    def _detect_hard_constraints(*, text: str, lower: str) -> list[str]:
+        constraints: list[str] = []
+        if "только swiftui" in lower:
+            constraints.append("Только SwiftUI")
+
+        ios_match = re.search(r"\bios\s*(\d+)\b", text, flags=re.IGNORECASE)
+        if ios_match:
+            constraints.append(f"iOS {ios_match.group(1)}")
+
+        if any(token in lower for token in ["без сторонних зависим", "без внешних библиотек", "без сторонних библиотек"]):
+            constraints.append("Без сторонних зависимостей")
+
+        if "mvvm" in lower and any(token in lower for token in ["только", "строго", "используй", "архитектура"]):
+            constraints.append("Архитектура MVVM")
+
+        if "без рекламы" in lower:
+            constraints.append("Без рекламы")
+
+        if any(token in lower for token in ["для детей", "детская аудитория", "для ребёнка", "для ребенка"]):
+            constraints.append("ЦА: дети")
+
+        deduped: list[str] = []
+        for item in constraints:
+            normalized = str(item or "").strip()
+            if normalized and normalized not in deduped:
+                deduped.append(normalized)
+        return deduped
+
     def _phase_from_explicit_request(self, lower_text: str) -> str:
         mapping = {
             "onboarding": "ONBOARDING",
@@ -533,6 +644,135 @@ class ProtocolCoordinator:
             if token in lower_text:
                 return phase
         return ""
+
+    @staticmethod
+    def _map_experience_to_user_role(experience: str) -> str:
+        normalized = str(experience or "").strip().lower()
+        if normalized in {"", "unknown", "неизвестно"}:
+            return ""
+        if normalized in {"новичок", "beginner", "junior", "с нуля"}:
+            return "новичок"
+        if normalized in {"есть опыт", "опытный", "intermediate", "middle"}:
+            return "есть опыт"
+        if normalized in {"продвинутый", "senior", "lead", "эксперт"}:
+            return "продвинутый"
+        return str(experience or "").strip()
+
+    @staticmethod
+    def _derive_response_style(experience: str) -> str:
+        normalized = str(experience or "").strip().lower()
+        if normalized in {"", "unknown", "неизвестно"}:
+            return ""
+        if normalized in {"новичок", "beginner", "junior", "с нуля"}:
+            return "Пошагово, простым языком, с пояснениями терминов."
+        if normalized in {"есть опыт", "опытный", "intermediate", "middle"}:
+            return "Кратко и по делу, с рабочими примерами и акцентом на архитектуру."
+        return "Компактно и технически, с фокусом на trade-offs и практические решения."
+
+    @staticmethod
+    def _parse_stack_tools(stack: str) -> list[str]:
+        raw = str(stack or "").strip()
+        if not raw:
+            return []
+        splitter = re.compile(r"\s*(?:\+|,|/|\\|\||&|\band\b|\bи\b)\s*", flags=re.IGNORECASE)
+        parts = splitter.split(raw)
+        out: list[str] = []
+        for part in parts:
+            cleaned = re.sub(r"\(.*?\)", "", str(part or "")).strip(" -\t")
+            if not cleaned:
+                continue
+            if cleaned not in out:
+                out.append(cleaned)
+        return out
+
+    @staticmethod
+    def _extract_profile_list_field(profile: dict[str, Any], *, field: str) -> list[str]:
+        payload = profile.get(field) if isinstance(profile, dict) else {}
+        value = payload.get("value") if isinstance(payload, dict) else []
+        if not isinstance(value, list):
+            return []
+        out: list[str] = []
+        for item in value:
+            text = str(item or "").strip()
+            if text and text not in out:
+                out.append(text)
+        return out
+
+    @staticmethod
+    def _normalize_constraints_list(value: Any) -> list[str]:
+        source = value
+        if isinstance(source, dict):
+            source = source.get("value")
+        if not isinstance(source, list):
+            return []
+        out: list[str] = []
+        for item in source:
+            normalized = str(item or "").strip()
+            if normalized and normalized not in out:
+                out.append(normalized)
+        return out
+
+    @staticmethod
+    def _merge_unique_lines(*, base: list[str], incoming: list[str]) -> list[str]:
+        out: list[str] = []
+        for item in list(base or []) + list(incoming or []):
+            normalized = str(item or "").strip()
+            if normalized and normalized not in out:
+                out.append(normalized)
+        return out
+
+    @staticmethod
+    def _normalize_project_context_payload(value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            project_name = str(value.get("project_name") or "").strip()
+            goals_raw = value.get("goals")
+            decisions_raw = value.get("key_decisions")
+        else:
+            project_name = ""
+            goals_raw = []
+            decisions_raw = []
+        goals: list[str] = []
+        if isinstance(goals_raw, list):
+            for item in goals_raw:
+                text = str(item or "").strip()
+                if text and text not in goals:
+                    goals.append(text)
+        key_decisions: list[str] = []
+        if isinstance(decisions_raw, list):
+            for item in decisions_raw:
+                text = str(item or "").strip()
+                if text and text not in key_decisions:
+                    key_decisions.append(text)
+        return {
+            "project_name": project_name,
+            "goals": goals,
+            "key_decisions": key_decisions,
+        }
+
+    @staticmethod
+    def _upsert_prefixed_line(*, lines: list[str], prefix: str, value: str) -> list[str]:
+        normalized_prefix = str(prefix or "").strip()
+        normalized_value = str(value or "").strip()
+        if not normalized_prefix or not normalized_value:
+            return [str(x).strip() for x in (lines or []) if str(x).strip()]
+
+        candidate = f"{normalized_prefix} {normalized_value}"
+        out: list[str] = []
+        replaced = False
+        for raw in list(lines or []):
+            line = str(raw or "").strip()
+            if not line:
+                continue
+            if line.lower().startswith(normalized_prefix.lower()):
+                if not replaced:
+                    out.append(candidate)
+                    replaced = True
+                continue
+            if line not in out:
+                out.append(line)
+        if not replaced:
+            out.append(candidate)
+        return out
 
     def _run_secret_scan(self) -> dict[str, Any]:
         if shutil.which("trufflehog"):
@@ -627,6 +867,7 @@ class ProtocolCoordinator:
             "target_audience": "",
             "stack": "Swift + SwiftUI",
             "monetization_model": "",
+            "hard_constraints": [],
             "current_progress": "",
             "updated_at": datetime.utcnow().isoformat(),
         }

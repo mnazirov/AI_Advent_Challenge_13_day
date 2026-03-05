@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from memory.long_term import LongTermMemory
@@ -18,6 +19,19 @@ logger = logging.getLogger("memory")
 class MemoryRouter:
     WORKING_CONFIDENCE_THRESHOLD = 0.65
     PROFILE_FORBIDDEN_SOURCES = ["working_memory", "task_artifact", "step_result"]
+    VALIDATION_CONFIRM_PATTERNS = [
+        "подтверждаю завершение",
+        "всё готово",
+        "задача выполнена",
+        "переходим к итогам",
+        "confirm",
+    ]
+    VALIDATION_REJECT_PATTERNS = [
+        "вернуться к выполнению",
+        "нужно доработать",
+        "есть замечания",
+        "back to execution",
+    ]
     DECISION_PATTERNS = [r"\bвыбираем\b", r"\bрешили\b", r"\bиспользуем\b", r"\bстандарт\b", r"\bдоговорились\b"]
     WORKING_PATTERNS = [r"\bтребован", r"\bэндпоинт", r"добавь шаг", r"сделаем так", r"текущий шаг", r"план"]
     NOTE_PATTERNS = [r"\bзапомни\b", r"\bважно\b", r"\bучти\b", r"\bфакт\b"]
@@ -40,6 +54,33 @@ class MemoryRouter:
         r"\bчто делать\b",
         r"\bоптимизируй\b",
         r"\bплан на\b",
+        r"\bхочу\b.*\b(?:ios|айос|приложени|app)\b",
+        r"\bдавай\b.*\b(?:созда(?:ть|дим)|сдела(?:ть|ем)|напиш(?:ем|и))\b.*\b(?:ios|приложени|app)\b",
+        r"\bс нуля\b.*\b(?:ios|приложени|app)\b",
+    ]
+    EXECUTION_ALLOW_PATTERNS = [
+        r"\bполный\b.*\bплан\b",
+        r"\bнужен\b.*\bплан\b",
+        r"\bс нуля\b",
+        r"\bдо первой покупки\b",
+        r"\bархитектур",
+        r"\bmvp\b",
+        r"\broadmap\b",
+        r"\bмонетизац",
+        r"\bstorekit\b",
+        r"\bswiftui\b",
+        r"\bчеклист\b",
+        r"\bследующ(?:ий|ие)\s+шаг",
+        r"\bкак\b.*\bсделать\b",
+        r"\bкак\b.*\bреализовать\b",
+    ]
+    EXECUTION_DENY_PATTERNS = [
+        r"\bзабудь\b",
+        r"\bдругая задача\b",
+        r"\bдругой проект\b",
+        r"\bсменим тему\b",
+        r"\bсмена контекста\b",
+        r"\bпереключим(?:ся)?\b.*\bзадач",
     ]
 
     def __init__(self, *, llm_client: "LLMClient | None" = None, step_parser_model: str = "gpt-5-nano"):
@@ -184,6 +225,25 @@ class MemoryRouter:
                         ctx=ctx,
                         patch=regex_patch,
                     )
+                    if plan_formation_intent:
+                        updated_ctx = working.load(session_id)
+                        if (
+                            updated_ctx
+                            and updated_ctx.state == TaskState.PLANNING
+                            and bool(updated_ctx.plan)
+                            and updated_ctx.current_step == updated_ctx.plan[0]
+                        ):
+                            try:
+                                working.transition_state(updated_ctx, TaskState.EXECUTION)
+                                updated_ctx.updated_at = datetime.utcnow().isoformat()
+                                working.save(updated_ctx)
+                                changed_keys.append("state")
+                                logger.info("[STATE_AUTO] PLANNING -> EXECUTION (plan formed)")
+                            except ValueError as exc:
+                                logger.info(
+                                    "[MEMORY_WRITE] layer=working blocked=true state=PLANNING reason=auto_transition_failed:%s",
+                                    str(exc),
+                                )
                     if changed_keys:
                         events.append(MemoryWriteEvent(layer="working", keys=changed_keys))
                 elif state == TaskState.EXECUTION:
@@ -216,6 +276,63 @@ class MemoryRouter:
                 logger.info("[MEMORY_WRITE] layer=%s keys=%s", event.layer, ",".join(event.keys))
 
         return events
+
+    def is_execution_allowed_message(self, *, text: str, current_step: str) -> bool:
+        normalized = str(text or "").strip()
+        step = str(current_step or "").strip()
+        if not normalized:
+            return False
+        lower = normalized.lower()
+        if self._matches_any(lower, self.EXECUTION_DENY_PATTERNS):
+            return False
+        if self._matches_any(lower, self.EXECUTION_ALLOW_PATTERNS):
+            return True
+        if self.llm_client is None:
+            return self._fallback_execution_allowance(text=normalized, current_step=step)
+
+        prompt = f"""You classify whether a user message is allowed in EXECUTION state of a task-state machine.
+Return ONLY valid JSON.
+
+Schema:
+{{
+  "allow": true/false,
+  "confidence": 0.0,
+  "reason": "short"
+}}
+
+Rules:
+- allow=true when the message is about the active step progress, implementation details, code requests, clarification for current solution, or marking step completion.
+- allow=false when the message tries to switch to another task/topic, asks to skip process control, or requests final full result that bypasses current step flow.
+- Keep confidence in [0,1].
+
+Current step:
+{step}
+
+User message:
+{normalized}
+"""
+        try:
+            response = self.llm_client.chat_completion(
+                model=self.step_parser_model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0,
+                max_tokens=120,
+            )
+            raw = str(response.choices[0].message.content or "").strip()
+            match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+            if not match:
+                return self._fallback_execution_allowance(text=normalized, current_step=step)
+            payload = json.loads(match.group())
+            if not isinstance(payload, dict):
+                return self._fallback_execution_allowance(text=normalized, current_step=step)
+            allow = bool(payload.get("allow"))
+            confidence = self._clamp_confidence(payload.get("confidence"))
+            if confidence < 0.5:
+                return self._fallback_execution_allowance(text=normalized, current_step=step)
+            return allow
+        except Exception as exc:
+            logger.warning("[EXECUTION_GUARD] llm classify failed: %s", exc)
+            return self._fallback_execution_allowance(text=normalized, current_step=step)
 
     def _extract_working_patch_from_regex(
         self,
@@ -485,6 +602,41 @@ User message:
             "Выполнить шаги и проверить результат тестами/валидацией",
         ]
 
+    @staticmethod
+    def _fallback_execution_allowance(*, text: str, current_step: str) -> bool:
+        lower = str(text or "").lower()
+        step_lower = str(current_step or "").strip().lower()
+        if not lower:
+            return False
+        context_switch_markers = (
+            "забудь",
+            "другая задача",
+            "другой проект",
+            "сменим тему",
+            "смена контекста",
+        )
+        if any(marker in lower for marker in context_switch_markers):
+            return False
+        helpful_request_markers = (
+            "полный план",
+            "нужен план",
+            "до первой покупки",
+            "архитектур",
+            "swiftui",
+            "mvp",
+            "монетизац",
+            "чеклист",
+            "следующий шаг",
+        )
+        if any(marker in lower for marker in helpful_request_markers):
+            return True
+        completion_markers = ("шаг выполнен", "выполнил", "выполнено", "готово", "done", "completed")
+        if step_lower and any(marker in lower for marker in completion_markers):
+            return True
+        if step_lower and step_lower in lower:
+            return True
+        return False
+
     def _guard_profile_source(self, source: str) -> None:
         normalized = str(source or "").strip()
         if normalized in self.PROFILE_FORBIDDEN_SOURCES:
@@ -585,8 +737,10 @@ User message:
             if artifact_payload:
                 changed_keys.append("artifacts")
             if updated_ctx.current_step is None and updated_ctx.done == updated_ctx.plan:
+                working.request_validation(session_id)
+                changed_keys.append("state")
                 logger.info(
-                    "All steps completed. Call request_validation() to proceed to VALIDATION."
+                    "[STATE_AUTO] EXECUTION -> VALIDATION (all plan steps completed)"
                 )
             return list(dict.fromkeys(changed_keys))
 

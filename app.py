@@ -582,19 +582,23 @@ def debug_memory_layers():
 @app.route("/debug/memory/profile", methods=["GET"])
 def debug_get_memory_profile():
     """Возвращает полный профиль long-term памяти с метаданными полей и конфликтами."""
-    user_id = _get_or_create_user_id()
-    session_id = _get_or_create_session(user_id=user_id)
+    user_id = _resolve_request_user_id()
+    requested_session_id = str(request.args.get("session_id") or "").strip()
+    session_id = _get_or_create_session(user_id=user_id, requested_session_id=requested_session_id)
     _log_http_request(
         "/debug/memory/profile",
         {"session_id": session_id[:8] + "…", "user_id": user_id[:12] + "…"},
     )
     try:
-        profile = agent.memory.get_profile_snapshot(user_id=user_id)
+        profile = agent.memory.get_profile_snapshot(user_id=user_id, session_id=session_id)
         payload = {
             "success": True,
             "profile": profile,
             "memory_writes": agent.memory.get_recent_write_events(session_id=session_id, limit=10),
         }
+        if isinstance(profile, dict):
+            # Backward-compatible shape for legacy scripts expecting top-level profile fields.
+            payload.update(profile)
         _log_http_response(
             "/debug/memory/profile",
             200,
@@ -727,9 +731,10 @@ def debug_protocol_validate_type2():
 @app.route("/debug/memory/profile/field", methods=["PATCH"])
 def debug_patch_memory_profile_field():
     """Обновляет поле профиля long-term памяти через DebugMenu."""
-    user_id = _get_or_create_user_id()
-    session_id = _get_or_create_session(user_id=user_id)
     data = request.get_json(silent=True) or {}
+    user_id = _resolve_request_user_id(data)
+    requested_session_id = str(data.get("session_id") or "").strip()
+    session_id = _get_or_create_session(user_id=user_id, requested_session_id=requested_session_id)
     field = str(data.get("field") or "").strip()
     value = data.get("value")
     _log_http_request(
@@ -762,9 +767,10 @@ def debug_patch_memory_profile_field():
 @app.route("/debug/memory/profile/field", methods=["DELETE"])
 def debug_delete_memory_profile_field():
     """Удаляет поле профиля long-term памяти (каноническое или extra)."""
-    user_id = _get_or_create_user_id()
-    session_id = _get_or_create_session(user_id=user_id)
     data = request.get_json(silent=True) or {}
+    user_id = _resolve_request_user_id(data)
+    requested_session_id = str(data.get("session_id") or "").strip()
+    session_id = _get_or_create_session(user_id=user_id, requested_session_id=requested_session_id)
     field = str(data.get("field") or "").strip()
     _log_http_request(
         "/debug/memory/profile/field",
@@ -795,9 +801,10 @@ def debug_delete_memory_profile_field():
 @app.route("/debug/memory/profile/field", methods=["POST"])
 def debug_add_memory_profile_field():
     """Добавляет новое поле в extra_fields профиля long-term памяти."""
-    user_id = _get_or_create_user_id()
-    session_id = _get_or_create_session(user_id=user_id)
     data = request.get_json(silent=True) or {}
+    user_id = _resolve_request_user_id(data)
+    requested_session_id = str(data.get("session_id") or "").strip()
+    session_id = _get_or_create_session(user_id=user_id, requested_session_id=requested_session_id)
     field = str(data.get("field") or "").strip()
     value = data.get("value")
     _log_http_request(
@@ -830,9 +837,10 @@ def debug_add_memory_profile_field():
 @app.route("/debug/memory/profile/confirm", methods=["POST"])
 def debug_confirm_memory_profile_field():
     """Подтверждает поле профиля (verified=true)."""
-    user_id = _get_or_create_user_id()
-    session_id = _get_or_create_session(user_id=user_id)
     data = request.get_json(silent=True) or {}
+    user_id = _resolve_request_user_id(data)
+    requested_session_id = str(data.get("session_id") or "").strip()
+    session_id = _get_or_create_session(user_id=user_id, requested_session_id=requested_session_id)
     field = str(data.get("field") or "").strip()
     _log_http_request(
         "/debug/memory/profile/confirm",
@@ -863,9 +871,10 @@ def debug_confirm_memory_profile_field():
 @app.route("/debug/memory/profile/conflict/resolve", methods=["POST"])
 def debug_resolve_memory_profile_conflict():
     """Разрешает конфликт inferred-значения профиля."""
-    user_id = _get_or_create_user_id()
-    session_id = _get_or_create_session(user_id=user_id)
     data = request.get_json(silent=True) or {}
+    user_id = _resolve_request_user_id(data)
+    requested_session_id = str(data.get("session_id") or "").strip()
+    session_id = _get_or_create_session(user_id=user_id, requested_session_id=requested_session_id)
     field = str(data.get("field") or "").strip()
     chosen_value = data.get("chosen_value")
     keep_existing = bool(data.get("keep_existing", False))

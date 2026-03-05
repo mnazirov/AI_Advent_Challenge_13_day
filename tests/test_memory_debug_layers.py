@@ -114,6 +114,37 @@ class DebugMemoryLayersRouteTests(unittest.TestCase):
         self.assertGreaterEqual(short_term.get("turns_count", 0), 2)
         self.assertTrue(any(marker in str(turn.get("full") or "") for turn in turns))
 
+    def test_debug_memory_profile_returns_synced_canonical_fields(self) -> None:
+        user_id = f"user_{uuid4().hex[:10]}"
+        project = storage.create_project(user_id=user_id, name=f"P_{uuid4().hex[:4]}", activate=True)
+        session_id = str(project["session_id"])
+        webapp.agent.memory.ensure_protocol_profile(user_id=user_id)
+        webapp.agent.memory.long_term.add_profile_extra_field(
+            user_id=user_id,
+            field="protocol_profile",
+            value={
+                "experience_level": "новичок",
+                "app_idea": "Трекер привычек",
+                "target_audience": "студенты",
+                "stack": "Swift + SwiftUI",
+                "monetization_model": "подписка",
+                "current_progress": "Собран базовый onboarding",
+                "updated_at": datetime.utcnow().isoformat(),
+            },
+            source="user_explicit",
+        )
+
+        with webapp.app.test_client() as client:
+            client.set_cookie("user_id", user_id)
+            client.set_cookie("session_id", session_id)
+            res = client.get("/debug/memory/profile")
+
+        self.assertEqual(res.status_code, 200)
+        payload = res.get_json() or {}
+        profile = payload.get("profile") or {}
+        self.assertEqual((profile.get("user_role_level") or {}).get("value"), "новичок")
+        self.assertIn("Swift", (profile.get("stack_tools") or {}).get("value") or [])
+
 
 if __name__ == "__main__":
     unittest.main()

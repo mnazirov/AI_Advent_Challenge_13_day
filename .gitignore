@@ -13,3 +13,4 @@ __pycache__/
 data/agent.db
 uploads/
 personalization_run.log
+.cli_user_id

@@ -7,6 +7,7 @@ from uuid import uuid4
 from flask import Flask, Response, jsonify, render_template, request
 
 from agent import IOSAgent
+from mcp_time import call_time_tool, get_time_tools
 from storage import (
     clear_session_messages,
     count_projects,
@@ -312,6 +313,117 @@ def get_models():
         "available_models": agent.available_models(),
     }
     _log_http_response("/models", 200, payload)
+    return jsonify(payload)
+
+
+@app.route("/mcp/time/tools", methods=["GET"])
+def route_mcp_time_tools():
+    """
+    GET /mcp/time/tools
+    Возвращает список инструментов MCP Time сервера.
+    """
+    result = get_time_tools()
+
+    if not result.success:
+        logger.error("[MCP_TIME] endpoint error: %s", result.error)
+        return jsonify(
+            {
+                "success": False,
+                "error": result.error,
+                "tools": [],
+            }
+        ), 500
+
+    logger.info("[MCP_TIME] endpoint ok, tools=%s", [tool.name for tool in result.tools])
+
+    return jsonify(
+        {
+            "success": True,
+            "count": len(result.tools),
+            "tools": [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                }
+                for tool in result.tools
+            ],
+        }
+    )
+
+
+@app.route("/mcp/time/call", methods=["POST"])
+def route_mcp_time_call():
+    """
+    POST /mcp/time/call
+    Вызывает инструмент MCP Time по имени с аргументами.
+    """
+    data = request.get_json(silent=True) or {}
+    tool = str(data.get("tool") or data.get("name") or "").strip()
+    arguments = data.get("arguments")
+    if not isinstance(arguments, dict):
+        arguments = {}
+
+    _log_http_request(
+        "/mcp/time/call",
+        {
+            "tool": tool,
+            "argument_keys": sorted(arguments.keys()),
+        },
+    )
+
+    if not tool:
+        payload = {"success": False, "error": "tool is required"}
+        _log_http_response("/mcp/time/call", 400, payload)
+        return jsonify(payload), 400
+
+    result = call_time_tool(tool, arguments)
+    if not result.success:
+        payload = {
+            "success": False,
+            "tool": tool,
+            "error": result.error or "MCP call failed",
+        }
+        _log_http_response("/mcp/time/call", 500, payload)
+        return jsonify(payload), 500
+
+    text_parts: list[str] = []
+    for item in result.content:
+        if isinstance(item, dict) and str(item.get("type") or "") == "text":
+            text = str(item.get("text") or "").strip()
+            if text:
+                text_parts.append(text)
+    combined_text = "\n".join(text_parts).strip()
+
+    payload = {
+        "success": not result.is_error,
+        "tool": tool,
+        "arguments": result.arguments,
+        "result": {
+            "is_error": result.is_error,
+            "content": result.content,
+            "structured": result.structured_content,
+            "text": combined_text,
+        },
+    }
+
+    if result.is_error:
+        payload["error"] = combined_text or "tool returned error"
+        _log_http_response(
+            "/mcp/time/call",
+            400,
+            {"success": False, "tool": tool, "error": payload["error"]},
+        )
+        return jsonify(payload), 400
+
+    _log_http_response(
+        "/mcp/time/call",
+        200,
+        {
+            "success": True,
+            "tool": tool,
+            "text_preview": _compact_text_for_log(combined_text),
+        },
+    )
     return jsonify(payload)
 
 

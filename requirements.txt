@@ -2,3 +2,5 @@ openai
 flask
 pandas
 requests
+mcp
+mcp-server-time

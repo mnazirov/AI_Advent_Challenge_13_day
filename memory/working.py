@@ -13,7 +13,7 @@ logger = logging.getLogger("memory")
 class WorkingMemory:
     ALLOWED_TRANSITIONS: dict[TaskState, set[TaskState]] = {
         TaskState.PLANNING: {TaskState.EXECUTION},
-        TaskState.EXECUTION: {TaskState.VALIDATION, TaskState.PLANNING, TaskState.DONE},
+        TaskState.EXECUTION: {TaskState.VALIDATION, TaskState.PLANNING},
         TaskState.VALIDATION: {TaskState.DONE, TaskState.EXECUTION},
         TaskState.DONE: set(),
     }
@@ -150,18 +150,6 @@ class WorkingMemory:
             logger.info(
                 "[ROLLBACK] EXECUTION -> PLANNING | cleared: current_step, done | preserved: artifacts, open_questions"
             )
-
-        if old == TaskState.EXECUTION and new_state == TaskState.DONE:
-            if ctx.done != ctx.plan:
-                raise ValueError("done != plan: cannot skip VALIDATION before all steps completed")
-            if not bool((ctx.vars or {}).get("allow_validation_skip")):
-                raise ValueError("VALIDATION skip is not confirmed")
-            ctx.current_step = None
-            vars_patch = dict(ctx.vars or {})
-            vars_patch["validation_skipped_by_user"] = True
-            vars_patch["validation_skip_note"] = "⚠️ VALIDATION SKIPPED BY USER (риск на пользователе)"
-            ctx.vars = vars_patch
-            logger.warning("[STATE] EXECUTION -> DONE via user validation skip")
 
         if old == TaskState.VALIDATION and new_state == TaskState.EXECUTION:
             if ctx.done:

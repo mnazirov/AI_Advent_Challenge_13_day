@@ -59,6 +59,20 @@ class WorkingMemoryTransitionsTests(unittest.TestCase):
         self.assertEqual(ctx.state, TaskState.VALIDATION)
         self.assertIsNone(ctx.current_step)
 
+    def test_execution_to_done_is_forbidden(self) -> None:
+        self.working.start_task(self.session_id, "Тестовая задача")
+        self.working.update(self.session_id, plan=["Шаг 1"], current_step="Шаг 1")
+        ctx = self.working.load(self.session_id)
+        assert ctx is not None
+        self.working.transition_state(ctx, TaskState.EXECUTION)
+        self.working.save(ctx)
+        self.working.complete_current_step(self.session_id)
+        execution_ctx = self.working.load(self.session_id)
+        assert execution_ctx is not None
+        self.assertEqual(execution_ctx.state, TaskState.EXECUTION)
+        with self.assertRaises(ValueError):
+            self.working.transition_state(execution_ctx, TaskState.DONE)
+
 
 if __name__ == "__main__":
     unittest.main()

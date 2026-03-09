@@ -708,6 +708,58 @@ def memory_clear_short_term_messages(session_id: str) -> None:
         conn.execute("DELETE FROM memory_short_term_messages WHERE session_id=?", (session_id,))
 
 
+def clear_session_conversation_context(session_id: str) -> dict[str, int]:
+    """
+    Очищает историю диалога и derived session-context без удаления working/long-term слоёв.
+    Используется для short-term forget/reset в debug UI.
+    """
+    with _get_conn() as conn:
+        meta_row = conn.execute(
+            """
+            SELECT total_tokens_in, total_tokens_out, total_cost_usd, cost_history,
+                   ctx_summary, ctx_summarized_upto, ctx_state
+            FROM sessions
+            WHERE id=?
+            """,
+            (session_id,),
+        ).fetchone()
+        messages_cur = conn.execute("DELETE FROM messages WHERE session_id=?", (session_id,))
+        short_cur = conn.execute("DELETE FROM memory_short_term_messages WHERE session_id=?", (session_id,))
+        conn.execute(
+            """
+            UPDATE sessions
+            SET total_tokens_in=0,
+                total_tokens_out=0,
+                total_cost_usd=0.0,
+                cost_history='[]',
+                ctx_summary='',
+                ctx_summarized_upto=0,
+                ctx_state='{}',
+                updated_at=CURRENT_TIMESTAMP
+            WHERE id=?
+            """,
+            (session_id,),
+        )
+
+    had_meta = False
+    if meta_row:
+        had_meta = bool(
+            int(meta_row["total_tokens_in"] or 0)
+            or int(meta_row["total_tokens_out"] or 0)
+            or float(meta_row["total_cost_usd"] or 0.0)
+            or str(meta_row["cost_history"] or "[]") != "[]"
+            or str(meta_row["ctx_summary"] or "").strip()
+            or int(meta_row["ctx_summarized_upto"] or 0)
+            or str(meta_row["ctx_state"] or "{}") != "{}"
+        )
+
+    return {
+        "messages": int(messages_cur.rowcount or 0),
+        "short_term": int(short_cur.rowcount or 0),
+        "session_meta": 1 if had_meta else 0,
+    }
+
+
 def _safe_json_loads(raw: str | None, default: object) -> object:
     try:
         return json.loads(raw or "")
@@ -1176,6 +1228,58 @@ def memory_delete_longterm_note(user_id: str, note_id: int) -> int:
             WHERE user_id=? AND id=?
             """,
             (user_id, int(note_id)),
+        )
+    return int(cur.rowcount or 0)
+
+
+def memory_delete_longterm_profile(user_id: str) -> int:
+    """Удаляет профиль long-term памяти пользователя. Возвращает число удалённых строк."""
+    with _get_conn() as conn:
+        cur = conn.execute(
+            """
+            DELETE FROM memory_longterm_profile
+            WHERE user_id=?
+            """,
+            (user_id,),
+        )
+    return int(cur.rowcount or 0)
+
+
+def memory_delete_all_longterm_decisions(user_id: str) -> int:
+    """Удаляет все long-term решения пользователя. Возвращает число удалённых строк."""
+    with _get_conn() as conn:
+        cur = conn.execute(
+            """
+            DELETE FROM memory_longterm_decisions
+            WHERE user_id=?
+            """,
+            (user_id,),
+        )
+    return int(cur.rowcount or 0)
+
+
+def memory_delete_all_longterm_notes(user_id: str) -> int:
+    """Удаляет все long-term заметки пользователя. Возвращает число удалённых строк."""
+    with _get_conn() as conn:
+        cur = conn.execute(
+            """
+            DELETE FROM memory_longterm_notes
+            WHERE user_id=?
+            """,
+            (user_id,),
+        )
+    return int(cur.rowcount or 0)
+
+
+def memory_delete_all_longterm_pending(user_id: str) -> int:
+    """Удаляет все pending-записи long-term пользователя. Возвращает число удалённых строк."""
+    with _get_conn() as conn:
+        cur = conn.execute(
+            """
+            DELETE FROM memory_longterm_pending
+            WHERE user_id=?
+            """,
+            (user_id,),
         )
     return int(cur.rowcount or 0)
 

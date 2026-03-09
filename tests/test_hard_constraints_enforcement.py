@@ -4,18 +4,19 @@ import unittest
 
 from agent import IOSAgent
 from memory.prompt_builder import PromptBuilder
-from memory.protocol import ProtocolCoordinator
 
 
 class _StubMemory:
-    def __init__(self, constraints: list[str]) -> None:
+    def __init__(self, constraints: list[str], *, verified: bool = True) -> None:
         self.constraints = list(constraints)
+        self.verified = bool(verified)
 
     def get_profile_snapshot(self, *, user_id: str, session_id: str | None = None) -> dict:
         _ = user_id, session_id
         return {
             "hard_constraints": {
                 "value": list(self.constraints),
+                "verified": self.verified,
             }
         }
 
@@ -48,24 +49,26 @@ class HardConstraintsEnforcementTests(unittest.TestCase):
         self.assertIn("Never violate them", system_prompt)
         self.assertIn("Name the specific constraint", system_prompt)
         self.assertIn("Propose a compliant alternative", system_prompt)
-
-    def test_protocol_extracts_and_appends_hard_constraints(self) -> None:
-        protocol = ProtocolCoordinator.__new__(ProtocolCoordinator)
-        patch = protocol._extract_profile_patch(
-            user_message=(
-                "Используй только SwiftUI, iOS 16, архитектура MVVM, "
-                "без сторонних зависимостей, без рекламы, для детей."
-            ),
-            current_profile={"hard_constraints": ["Уже задано"]},
-        )
-        constraints = patch.get("hard_constraints") or []
-        self.assertIn("Уже задано", constraints)
-        self.assertIn("Только SwiftUI", constraints)
-        self.assertIn("iOS 16", constraints)
-        self.assertIn("Архитектура MVVM", constraints)
-        self.assertIn("Без сторонних зависимостей", constraints)
-        self.assertIn("Без рекламы", constraints)
-        self.assertIn("ЦА: дети", constraints)
+        self.assertIn("[ROLE]", system_prompt)
+        self.assertIn("[PROFILE]", system_prompt)
+        self.assertIn("[STATE]", system_prompt)
+        self.assertIn("[INVARIANTS]", system_prompt)
+        self.assertIn("[RULES]", system_prompt)
+        self.assertIn("[USER QUERY]", system_prompt)
+        self.assertIn("[STEP_DONE: N]", system_prompt)
+        self.assertIn("[NEXT_STATE: PLANNING]", system_prompt)
+        self.assertIn("[NEXT_STATE: EXECUTION]", system_prompt)
+        self.assertIn("[NEXT_STATE: VALIDATION]", system_prompt)
+        self.assertIn("[NEXT_STATE: DONE]", system_prompt)
+        self.assertIn("[VALIDATION_OK]", system_prompt)
+        self.assertIn("[VALIDATION_FAIL: причина]", system_prompt)
+        self.assertIn("[DONE: описание]", system_prompt)
+        self.assertIn("[OPEN_QUESTION: текст]", system_prompt)
+        self.assertIn("[CODE_ARTIFACT]", system_prompt)
+        self.assertIn("КРИТИЧНО — ДОПУСТИМЫЕ МАРКЕРЫ:", system_prompt)
+        self.assertIn("В PLANNING формируй краткий согласованный план шагов", system_prompt)
+        self.assertIn("Переход в EXECUTION допустим только после явного подтверждения плана", system_prompt)
+        self.assertIn("use [NEXT_STATE: PLANNING] ONLY if user explicitly asks", system_prompt)
 
     def test_agent_refuses_and_names_violated_constraint(self) -> None:
         agent = IOSAgent.__new__(IOSAgent)
@@ -79,36 +82,23 @@ class HardConstraintsEnforcementTests(unittest.TestCase):
         self.assertIn("Вместо этого предлагаю:", reply)
         self.assertIn("SwiftUI", reply)
 
-    def test_canonical_patch_keeps_existing_and_adds_protocol_constraints(self) -> None:
-        protocol = ProtocolCoordinator.__new__(ProtocolCoordinator)
-        patch = protocol.build_canonical_patch(
-            protocol_profile={
-                "experience_level": "unknown",
-                "stack": "",
-                "monetization_model": "",
-                "target_audience": "",
-                "app_idea": "",
-                "current_progress": "",
-                "hard_constraints": ["Только SwiftUI", "Без рекламы"],
-            },
-            current_profile={
-                "hard_constraints": {
-                    "value": ["iOS 16"],
-                },
-                "project_context": {
-                    "value": {
-                        "project_name": "",
-                        "goals": [],
-                        "key_decisions": [],
-                    }
-                },
-            },
+    def test_agent_ignores_unverified_hard_constraints(self) -> None:
+        agent = IOSAgent.__new__(IOSAgent)
+        agent.memory = _StubMemory(["Только SwiftUI"], verified=False)
+        reply = agent._enforce_hard_constraints_on_reply(
+            user_id="u1",
+            reply="Используем UIKit:\nimport UIKit\nclass LoginVC: UIViewController {}",
         )
-        canonical_constraints = ((patch.get("hard_constraints") or {}).get("value")) or []
-        self.assertIn("iOS 16", canonical_constraints)
-        self.assertIn("Только SwiftUI", canonical_constraints)
-        self.assertIn("Без рекламы", canonical_constraints)
+        self.assertIn("UIKit", reply)
+        self.assertNotIn("Не могу выполнить запрос", reply)
 
+    def test_mvvm_constraint_does_not_treat_product_mvp_as_architecture(self) -> None:
+        agent = IOSAgent.__new__(IOSAgent)
+        violation = agent._detect_constraint_violation(
+            constraint="Архитектура MVVM",
+            reply="MVP согласован, давай зафиксируем scope и экраны.",
+        )
+        self.assertIsNone(violation)
 
 if __name__ == "__main__":
     unittest.main()

@@ -878,6 +878,12 @@ body::before {
   display: block;
 }
 
+.dd-memory-panel-head {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
 .dd-memory-list {
   display: flex; flex-direction: column; gap: 6px;
 }
@@ -2585,6 +2591,209 @@ body::before,
   font-size: var(--text-xs);
 }
 
+.state-progress-bar {
+  grid-column: 1;
+  grid-row: 2;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  padding: 7px 16px 6px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  height: 56px;
+  overflow: hidden;
+}
+
+.state-progress-track {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.state-progress-item {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition: opacity 0.34s ease, transform 0.34s ease;
+}
+
+.state-progress-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.state-progress-node {
+  width: 17px;
+  height: 17px;
+  border-radius: 999px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  transition: background 0.34s ease, border-color 0.34s ease, color 0.34s ease, box-shadow 0.34s ease;
+}
+
+.state-progress-node-icon {
+  line-height: 1;
+}
+
+.state-progress-connector {
+  flex: 1;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--border-default);
+  transition: background 0.34s ease;
+}
+
+.state-progress-item:last-child .state-progress-connector {
+  display: none;
+}
+
+.state-progress-label {
+  display: block;
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 0.34s ease, font-weight 0.34s ease;
+}
+
+.state-progress-meta {
+  display: block;
+  min-height: 11px;
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: center;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 0.34s ease, transform 0.34s ease, color 0.34s ease;
+}
+
+.state-progress-meta.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.state-progress-subtrack {
+  display: block;
+  width: min(86px, 100%);
+  margin: 0 auto;
+  height: 2px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 0.34s ease;
+}
+
+.state-progress-subtrack.visible {
+  opacity: 1;
+}
+
+.state-progress-subfill {
+  width: 0%;
+  height: 100%;
+  background: var(--accent-blue);
+  transition: width 0.34s ease;
+}
+
+.state-progress-item.done .state-progress-node {
+  background: rgba(48,209,88,0.16);
+  border-color: rgba(48,209,88,0.45);
+  color: var(--accent-green);
+}
+
+.state-progress-item.done .state-progress-label {
+  color: var(--text-secondary);
+}
+
+.state-progress-item.done .state-progress-meta {
+  color: var(--text-muted);
+}
+
+.state-progress-item.active {
+  transform: translateY(-1px);
+}
+
+.state-progress-item.active .state-progress-node {
+  background: rgba(10,132,255,0.2);
+  border-color: rgba(10,132,255,0.55);
+  color: #cfe5ff;
+  animation: stateProgressPulse 1.55s ease-in-out infinite;
+}
+
+.state-progress-item.active .state-progress-label {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.state-progress-item.active .state-progress-meta {
+  color: var(--accent-blue);
+}
+
+.state-progress-item.active[data-state="IDLE"] {
+  transform: none;
+}
+
+.state-progress-item.active[data-state="IDLE"] .state-progress-node {
+  animation: none;
+  box-shadow: none;
+  background: var(--bg-elevated);
+  border-color: var(--border-default);
+  color: var(--text-secondary);
+}
+
+.state-progress-item.future {
+  opacity: 0.74;
+}
+
+.state-progress-connector.done {
+  background: rgba(48,209,88,0.38);
+}
+
+.state-progress-active-detail {
+  display: none;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes stateProgressPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(10,132,255,0.28); }
+  50% { box-shadow: 0 0 0 6px rgba(10,132,255,0); }
+}
+
+@keyframes stateBlockedPulse {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.14); }
+  100% { transform: scale(1); }
+}
+
+.state-progress-node.blocked-pulse {
+  animation: stateBlockedPulse 0.24s ease;
+}
+
+#taskStateBadge {
+  display: none !important;
+}
+
 .task-state-panel {
   grid-column: 2;
   grid-row: 1 / span 4;
@@ -2766,15 +2975,20 @@ body::before,
 }
 
 .idle-tip {
-  background: var(--bg-elevated);
+  width: 100%;
   border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
   border-radius: 8px;
   padding: 9px 12px;
+  min-height: 38px;
   font-size: 12px;
+  line-height: 1.4;
   color: var(--text-secondary);
+  font-family: var(--sans);
+  text-align: left;
+  appearance: none;
   cursor: pointer;
   transition: all 0.15s;
-  line-height: 1.4;
 }
 
 .idle-tip:hover {
@@ -2782,6 +2996,88 @@ body::before,
   border-color: var(--accent-blue);
   color: var(--text-primary);
   transform: translateX(2px);
+}
+
+.idle-tips.fade-in {
+  animation: quickStartFadeIn 0.2s ease-out;
+}
+
+.quick-start-skeleton-row {
+  background: #2a2a2a;
+  border: 1px solid rgba(255,255,255,0.05);
+  border-radius: 8px;
+  height: 38px;
+  position: relative;
+  overflow: hidden;
+}
+
+.quick-start-skeleton-row::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, #3a3a3a 50%, transparent 100%);
+  transform: translateX(-120%);
+  animation: quickStartShimmer 1.15s linear infinite;
+}
+
+.quick-start-error {
+  gap: 8px;
+}
+
+.quick-start-error-msg {
+  border: 1px solid rgba(255, 69, 58, 0.35);
+  background: rgba(255, 69, 58, 0.12);
+  color: #ffb4af;
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.quick-start-retry-btn,
+.quick-start-regenerate-btn {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--sans);
+  font-size: 12px;
+  padding: 9px 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.quick-start-regenerate-btn {
+  margin-top: 8px;
+}
+
+.quick-start-retry-btn:hover,
+.quick-start-regenerate-btn:hover {
+  border-color: var(--accent-blue);
+  color: var(--text-primary);
+  background: rgba(10,132,255,0.10);
+}
+
+.quick-start-retry-btn:disabled,
+.quick-start-regenerate-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@keyframes quickStartShimmer {
+  100% {
+    transform: translateX(120%);
+  }
+}
+
+@keyframes quickStartFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .task-state-panel.idle-mode .task-step-counter,
@@ -2989,7 +3285,8 @@ body::before,
 }
 
 .bubble.assistant {
-  white-space: pre-wrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .bubble.assistant .hljs {
@@ -3707,6 +4004,12 @@ textarea::placeholder,
     overflow: hidden;
   }
 
+  #stateProgressBar {
+    grid-column: 1;
+    grid-row: 2;
+    padding: 6px 10px 5px;
+  }
+
   #taskStatePanel .task-progress,
   #taskStatePanel .task-done-list,
   #taskStatePanel .task-current,
@@ -3743,6 +4046,37 @@ textarea::placeholder,
   .debug-drawer {
     width: 100vw;
     border-left: none;
+  }
+}
+
+@media (max-width: 479px) {
+  #stateProgressBar {
+    padding: 6px 8px;
+    gap: 2px;
+  }
+
+  #stateProgressBar .state-progress-item {
+    gap: 0;
+  }
+
+  #stateProgressBar .state-progress-label,
+  #stateProgressBar .state-progress-meta,
+  #stateProgressBar .state-progress-subtrack {
+    display: none !important;
+  }
+
+  #stateProgressBar .state-progress-top {
+    gap: 4px;
+  }
+
+  #stateProgressBar .state-progress-node {
+    width: 15px;
+    height: 15px;
+    font-size: 9px;
+  }
+
+  #stateProgressBar .state-progress-active-detail {
+    display: block;
   }
 }
 </style>
@@ -3912,6 +4246,57 @@ textarea::placeholder,
       </div>
     </div>
 
+    <div class="state-progress-bar" id="stateProgressBar" aria-live="polite" aria-label="Прогресс состояния задачи">
+      <ol class="state-progress-track" id="stateProgressTrack">
+        <li class="state-progress-item" data-state="IDLE">
+          <div class="state-progress-top">
+            <span class="state-progress-node"><span class="state-progress-node-icon">I</span></span>
+            <span class="state-progress-connector"></span>
+          </div>
+          <span class="state-progress-label">Ожидание</span>
+          <span class="state-progress-meta"></span>
+          <span class="state-progress-subtrack"><span class="state-progress-subfill"></span></span>
+        </li>
+        <li class="state-progress-item" data-state="PLANNING">
+          <div class="state-progress-top">
+            <span class="state-progress-node"><span class="state-progress-node-icon">P</span></span>
+            <span class="state-progress-connector"></span>
+          </div>
+          <span class="state-progress-label">Планирование</span>
+          <span class="state-progress-meta"></span>
+          <span class="state-progress-subtrack"><span class="state-progress-subfill"></span></span>
+        </li>
+        <li class="state-progress-item" data-state="EXECUTION">
+          <div class="state-progress-top">
+            <span class="state-progress-node"><span class="state-progress-node-icon">E</span></span>
+            <span class="state-progress-connector"></span>
+          </div>
+          <span class="state-progress-label">Выполнение</span>
+          <span class="state-progress-meta"></span>
+          <span class="state-progress-subtrack"><span class="state-progress-subfill"></span></span>
+        </li>
+        <li class="state-progress-item" data-state="VALIDATION">
+          <div class="state-progress-top">
+            <span class="state-progress-node"><span class="state-progress-node-icon">V</span></span>
+            <span class="state-progress-connector"></span>
+          </div>
+          <span class="state-progress-label">Проверка</span>
+          <span class="state-progress-meta"></span>
+          <span class="state-progress-subtrack"><span class="state-progress-subfill"></span></span>
+        </li>
+        <li class="state-progress-item" data-state="DONE">
+          <div class="state-progress-top">
+            <span class="state-progress-node"><span class="state-progress-node-icon">D</span></span>
+            <span class="state-progress-connector"></span>
+          </div>
+          <span class="state-progress-label">Завершено</span>
+          <span class="state-progress-meta"></span>
+          <span class="state-progress-subtrack"><span class="state-progress-subfill"></span></span>
+        </li>
+      </ol>
+      <div class="state-progress-active-detail" id="stateProgressActiveDetail">Ожидание</div>
+    </div>
+
     <div class="task-state-panel" id="taskStatePanel">
       <div class="task-state-head">
         <span class="task-state-badge idle" id="taskStateBadge">IDLE</span>
@@ -3932,12 +4317,8 @@ textarea::placeholder,
         </div>
         <div class="idle-section">
           <div class="idle-section-label">Быстрый старт</div>
-          <div class="idle-tips">
-            <div class="idle-tip" onclick="sendFromPanel(this)">💡 Есть идея — помоги с MVP</div>
-            <div class="idle-tip" onclick="sendFromPanel(this)">🏗 Выбери архитектуру для проекта</div>
-            <div class="idle-tip" onclick="sendFromPanel(this)">📋 Составь план разработки</div>
-            <div class="idle-tip" onclick="sendFromPanel(this)">🚀 Подготовь чеклист для App Store</div>
-          </div>
+          <div class="idle-tips" id="quickStartTips"></div>
+          <button type="button" class="quick-start-regenerate-btn" id="quickStartRegenerateBtn">↻ Перегенерировать</button>
         </div>
       </div>
     </div>
@@ -4033,7 +4414,6 @@ textarea::placeholder,
           <div class="dd-memory-header">
             <span class="dd-memory-title">Краткосрочная / Рабочая / Долговременная</span>
             <div class="dd-memory-actions">
-              <button type="button" class="dd-micro-btn" id="memoryClearWorkingBtn" onclick="DebugMenu.clearWorkingMemory()">Очистить рабочую</button>
               <button type="button" class="dd-micro-btn" id="memoryLayersRefresh" onclick="DebugMenu.refreshMemoryLayers()">Refresh</button>
             </div>
           </div>
@@ -4047,12 +4427,21 @@ textarea::placeholder,
           </div>
           <div class="dd-memory-panels">
             <div class="dd-memory-panel active" id="memoryPanelShortTerm">
+              <div class="dd-memory-panel-head">
+                <button type="button" class="dd-micro-btn" id="memoryClearShortBtn" title="Удаляет историю текущей сессии из prompt и восстановляемого чата" onclick="DebugMenu.clearShortTermMemory()">Очистить краткосрочную</button>
+              </div>
               <div class="dd-memory-list" id="memoryShortTermList"></div>
             </div>
             <div class="dd-memory-panel" id="memoryPanelWorking">
+              <div class="dd-memory-panel-head">
+                <button type="button" class="dd-micro-btn" id="memoryClearWorkingBtn" onclick="DebugMenu.clearWorkingMemory()">Очистить рабочую</button>
+              </div>
               <div class="dd-memory-working-content" id="memoryWorkingContent"></div>
             </div>
             <div class="dd-memory-panel" id="memoryPanelLongTerm">
+              <div class="dd-memory-panel-head">
+                <button type="button" class="dd-micro-btn" id="memoryClearLongBtn" onclick="DebugMenu.clearLongTermMemory()">Очистить долговременную</button>
+              </div>
               <div class="dd-memory-longterm-content" id="memoryLongTermContent"></div>
             </div>
           </div>
@@ -4138,6 +4527,15 @@ textarea::placeholder,
   let projectItemErrors = {};
   const formSelections = {};
   let assistantMessageSeq = 0;
+  const STATE_PROGRESS_ORDER = Object.freeze(['IDLE', 'PLANNING', 'EXECUTION', 'VALIDATION', 'DONE']);
+  const STATE_PROGRESS_INFO = Object.freeze({
+    IDLE: { label: 'Ожидание', icon: 'I' },
+    PLANNING: { label: 'Планирование', icon: 'P' },
+    EXECUTION: { label: 'Выполнение', icon: 'E' },
+    VALIDATION: { label: 'Проверка', icon: 'V' },
+    DONE: { label: 'Завершено', icon: 'D' },
+  });
+  let stateProgressTransitionTimer = null;
   let currentWorkingView = {
     state: null,
     current_step: null,
@@ -4145,8 +4543,158 @@ textarea::placeholder,
     total_steps: 0,
     done: [],
     plan: [],
+    current_sub_step: null,
+    total_sub_steps: null,
+    completed_states: [],
   };
   let currentTaskActions = [];
+  const QUICK_START_SUGGESTIONS_COUNT = 10;
+  const QUICK_START_STATIC_SUGGESTIONS = Object.freeze([
+    'Напиши safe subscript для Collection в Swift',
+    'Почини крэш index out of range в массиве',
+    'Добавь валидацию email и пароля в SwiftUI форме',
+    'Покажи минимальный MVVM шаблон для экрана входа',
+    'Сделай extension для безопасного удаления элемента массива',
+    'Напиши unit-тесты для safe доступа к массиву',
+    'Добавь обработку ошибок сети в URLSession клиенте',
+    'Покажи пример TaskGroup для параллельных запросов',
+    'Составь короткий план для фикса бага в iOS приложении',
+  ]);
+
+  const QuickStartPanel = (() => {
+    const state = {
+      status: 'loading',
+      suggestions: [],
+      cache: null,
+      loading: false,
+      requestSeq: 0,
+      skeletonWidths: [],
+    };
+
+    function init() {
+      const tipsEl = document.getElementById('quickStartTips');
+      const regenBtn = document.getElementById('quickStartRegenerateBtn');
+      if (!tipsEl || !regenBtn) return;
+
+      regenBtn.addEventListener('click', () => {
+        regenerate();
+      });
+
+      tipsEl.addEventListener('click', (event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        const button = target.closest('[data-quick-start-action]');
+        if (!button) return;
+        const action = String(button.getAttribute('data-quick-start-action') || '').trim();
+        if (action === 'use') {
+          const idx = Number(button.getAttribute('data-quick-start-index'));
+          const text = Number.isInteger(idx) ? state.suggestions[idx] : '';
+          insertPromptIntoInput(text || button.textContent || '');
+          return;
+        }
+        if (action === 'retry') {
+          regenerate();
+        }
+      });
+
+      loadIfNeeded();
+    }
+
+    function loadIfNeeded() {
+      if (state.cache !== null) {
+        state.suggestions = Array.isArray(state.cache) ? state.cache.slice() : [];
+        state.status = 'success';
+        state.loading = false;
+        render({ animate: false });
+        return;
+      }
+      fetchSuggestions({ force: true, animate: false });
+    }
+
+    async function regenerate() {
+      await fetchSuggestions({ force: true, animate: true });
+    }
+
+    async function fetchSuggestions(options = {}) {
+      const force = Boolean(options.force);
+      const animate = Boolean(options.animate);
+      if (state.loading && !force) return;
+      if (!force && state.cache !== null) {
+        state.suggestions = Array.isArray(state.cache) ? state.cache.slice() : [];
+        state.status = 'success';
+        state.loading = false;
+        render({ animate: false });
+        return;
+      }
+
+      const requestId = ++state.requestSeq;
+      state.loading = true;
+      state.status = 'loading';
+      state.skeletonWidths = buildSkeletonWidths();
+      render({ animate: false });
+
+      // local-only tips: no background /chat request, no extra session traffic
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      if (requestId !== state.requestSeq) return;
+      const parsed = rotateSuggestions(QUICK_START_STATIC_SUGGESTIONS);
+      state.cache = parsed.slice();
+      state.suggestions = parsed.slice();
+      state.status = 'success';
+      state.loading = false;
+      render({ animate });
+    }
+
+    function rotateSuggestions(source) {
+      const items = Array.isArray(source) ? source.slice() : [];
+      if (!items.length) return [];
+      const offset = Math.floor(Math.random() * items.length);
+      const ordered = items.slice(offset).concat(items.slice(0, offset));
+      return ordered.slice(0, QUICK_START_SUGGESTIONS_COUNT);
+    }
+
+    function buildSkeletonWidths() {
+      return Array.from({ length: QUICK_START_SUGGESTIONS_COUNT }, () => 60 + Math.floor(Math.random() * 31));
+    }
+
+    function render(options = {}) {
+      const tipsEl = document.getElementById('quickStartTips');
+      const regenBtn = document.getElementById('quickStartRegenerateBtn');
+      if (!tipsEl || !regenBtn) return;
+
+      const animate = Boolean(options.animate);
+      regenBtn.disabled = state.loading;
+
+      if (state.status === 'loading') {
+        const widths = (state.skeletonWidths || []).slice(0, QUICK_START_SUGGESTIONS_COUNT);
+        tipsEl.className = 'idle-tips';
+        tipsEl.innerHTML = widths
+          .map((widthPct) => `<div class="quick-start-skeleton-row" style="width:${widthPct}%"></div>`)
+          .join('');
+        return;
+      }
+
+      if (state.status === 'error') {
+        tipsEl.className = 'idle-tips quick-start-error';
+        tipsEl.innerHTML = [
+          '<div class="quick-start-error-msg">Не удалось загрузить</div>',
+          '<button type="button" class="quick-start-retry-btn" data-quick-start-action="retry">Попробовать снова</button>',
+        ].join('');
+        return;
+      }
+
+      tipsEl.className = animate ? 'idle-tips fade-in' : 'idle-tips';
+      tipsEl.innerHTML = (state.suggestions || [])
+        .map((text, idx) => {
+          return `<button type="button" class="idle-tip" data-quick-start-action="use" data-quick-start-index="${idx}">${esc(text)}</button>`;
+        })
+        .join('');
+    }
+
+    return {
+      init,
+      regenerate,
+    };
+  })();
 
   window.addEventListener('DOMContentLoaded', async () => {
     buildLoaderChart();
@@ -4155,6 +4703,7 @@ textarea::placeholder,
     DebugMenu.init();
     TokenTracker.init();
     updateWorkingView(null);
+    QuickStartPanel.init();
     await initModelSelector();
     await ProjectManager.init();
   });
@@ -4174,6 +4723,11 @@ textarea::placeholder,
       total_steps: Number(raw.total_steps || 0),
       done: Array.isArray(raw.done) ? raw.done.map((x) => String(x || '')).filter(Boolean) : [],
       plan: Array.isArray(raw.plan) ? raw.plan.map((x) => String(x || '')).filter(Boolean) : [],
+      current_sub_step: raw.current_sub_step == null ? null : Number(raw.current_sub_step),
+      total_sub_steps: raw.total_sub_steps == null ? null : Number(raw.total_sub_steps),
+      completed_states: Array.isArray(raw.completed_states)
+        ? raw.completed_states.map((x) => String(x || '').trim().toUpperCase()).filter(Boolean)
+        : [],
     };
   }
 
@@ -4211,8 +4765,177 @@ textarea::placeholder,
     );
   }
 
+  function toPositiveInt(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return null;
+    const normalized = Math.floor(num);
+    return normalized > 0 ? normalized : null;
+  }
+
+  function buildStateProgressData(view) {
+    const raw = view || {};
+    const totalSteps = Math.max(0, Number(raw.total_steps || 0));
+    const doneCount = Array.isArray(raw.done) ? raw.done.length : 0;
+    const planCount = Array.isArray(raw.plan) ? raw.plan.length : 0;
+    const hasCurrentStep = Boolean(String(raw.current_step || '').trim());
+    const awaitingValidation = Boolean(raw.awaiting_validation);
+    const rawState = String(raw.state || '').trim().toUpperCase();
+    const hasExecutionSignals = hasCurrentStep || totalSteps > 0 || planCount > 0 || doneCount > 0;
+    const source = String(raw.source || '').trim().toLowerCase();
+    let currentState = STATE_PROGRESS_ORDER.includes(rawState) ? rawState : null;
+    if (!currentState) {
+      if (source === 'none') {
+        currentState = 'IDLE';
+      } else if (awaitingValidation) {
+        currentState = 'VALIDATION';
+      } else if (hasExecutionSignals) {
+        currentState = 'EXECUTION';
+      } else {
+        currentState = 'IDLE';
+      }
+    }
+    let currentStep = raw.step_index == null ? null : Number(raw.step_index);
+    if (currentState === 'EXECUTION' && (currentStep == null || Number.isNaN(currentStep)) && totalSteps > 0) {
+      currentStep = doneCount + 1;
+    }
+    if (currentStep != null && !Number.isNaN(currentStep)) {
+      currentStep = Math.min(Math.max(1, Math.floor(currentStep)), Math.max(1, totalSteps));
+    } else {
+      currentStep = null;
+    }
+
+    let currentSubStep = toPositiveInt(raw.current_sub_step);
+    let totalSubSteps = toPositiveInt(raw.total_sub_steps);
+    if (currentSubStep && totalSubSteps) {
+      currentSubStep = Math.min(currentSubStep, totalSubSteps);
+    } else if (!totalSubSteps) {
+      currentSubStep = null;
+    }
+
+    let completedStates = Array.isArray(raw.completed_states)
+      ? raw.completed_states
+        .map((x) => String(x || '').trim().toUpperCase())
+        .filter((x) => STATE_PROGRESS_ORDER.includes(x))
+      : [];
+    if (!completedStates.length) {
+      const stateIndex = STATE_PROGRESS_ORDER.indexOf(currentState);
+      completedStates = stateIndex > 0 ? STATE_PROGRESS_ORDER.slice(0, stateIndex) : [];
+    }
+    if (currentState === 'DONE') {
+      completedStates = STATE_PROGRESS_ORDER.slice();
+    }
+
+    return {
+      current_state: currentState,
+      current_sub_step: currentSubStep,
+      total_sub_steps: totalSubSteps,
+      current_step: currentStep,
+      total_steps: totalSteps,
+      completed_states: completedStates,
+    };
+  }
+
+  function renderStateProgressBar(view) {
+    const bar = document.getElementById('stateProgressBar');
+    const track = document.getElementById('stateProgressTrack');
+    if (!bar || !track) return;
+
+    const data = view && typeof view === 'object' && view.current_state
+      ? view
+      : buildStateProgressData(view);
+    const activeState = data.current_state;
+    const activeIndex = STATE_PROGRESS_ORDER.indexOf(activeState);
+    const completedSet = new Set(Array.isArray(data.completed_states) ? data.completed_states : []);
+    STATE_PROGRESS_ORDER.forEach((stateName, idx) => {
+      if (idx < activeIndex || activeState === 'DONE') completedSet.add(stateName);
+    });
+
+    const items = track.querySelectorAll('.state-progress-item');
+    items.forEach((item) => {
+      const stateName = String(item.dataset.state || '').toUpperCase();
+      if (!STATE_PROGRESS_INFO[stateName]) return;
+      const stateIndex = STATE_PROGRESS_ORDER.indexOf(stateName);
+      const isActive = stateName === activeState;
+      const isDone = completedSet.has(stateName);
+      const isFuture = !isActive && !isDone;
+      item.classList.toggle('active', isActive);
+      item.classList.toggle('done', isDone);
+      item.classList.toggle('future', isFuture);
+
+      const iconEl = item.querySelector('.state-progress-node-icon');
+      if (iconEl) {
+        iconEl.textContent = (isDone && (!isActive || activeState === 'DONE')) ? '✓' : STATE_PROGRESS_INFO[stateName].icon;
+      }
+      const labelEl = item.querySelector('.state-progress-label');
+      if (labelEl) {
+        labelEl.textContent = STATE_PROGRESS_INFO[stateName].label;
+      }
+
+      let metaText = '';
+      let subPercent = 0;
+      if (stateName === 'PLANNING' && data.total_sub_steps) {
+        const planningStep = Math.min(Math.max(1, Number(data.current_sub_step || 1)), data.total_sub_steps);
+        metaText = `${planningStep} / ${data.total_sub_steps}`;
+        subPercent = (planningStep / data.total_sub_steps) * 100;
+        if (isDone && !isActive) subPercent = 100;
+      } else if (stateName === 'EXECUTION' && data.total_steps > 0 && data.current_step != null) {
+        const execStep = Math.min(Math.max(1, Number(data.current_step || 1)), Math.max(1, data.total_steps));
+        metaText = `Шаг ${execStep} из ${data.total_steps}`;
+        subPercent = (execStep / data.total_steps) * 100;
+      }
+
+      const metaEl = item.querySelector('.state-progress-meta');
+      if (metaEl) {
+        metaEl.textContent = metaText;
+        metaEl.classList.toggle('visible', Boolean(metaText) && (isActive || isDone));
+      }
+      const subTrackEl = item.querySelector('.state-progress-subtrack');
+      if (subTrackEl) {
+        const showSubTrack = Boolean(metaText) && stateName === 'PLANNING' && (isActive || isDone);
+        subTrackEl.classList.toggle('visible', showSubTrack);
+      }
+      const subFillEl = item.querySelector('.state-progress-subfill');
+      if (subFillEl) {
+        const fill = Math.min(100, Math.max(0, subPercent));
+        subFillEl.style.width = `${fill}%`;
+      }
+
+      const connector = item.querySelector('.state-progress-connector');
+      if (connector) {
+        connector.classList.toggle('done', stateIndex < activeIndex);
+      }
+    });
+
+    const detailEl = document.getElementById('stateProgressActiveDetail');
+    if (detailEl) {
+      let activeMeta = '';
+      if (activeState === 'PLANNING' && data.total_sub_steps) {
+        const planningStep = Math.min(Math.max(1, Number(data.current_sub_step || 1)), data.total_sub_steps);
+        activeMeta = `${planningStep} / ${data.total_sub_steps}`;
+      } else if (activeState === 'EXECUTION' && data.total_steps > 0 && data.current_step != null) {
+        const execStep = Math.min(Math.max(1, Number(data.current_step || 1)), Math.max(1, data.total_steps));
+        activeMeta = `Шаг ${execStep} из ${data.total_steps}`;
+      }
+      detailEl.textContent = activeMeta
+        ? `${STATE_PROGRESS_INFO[activeState].label} · ${activeMeta}`
+        : STATE_PROGRESS_INFO[activeState].label;
+    }
+
+    const prevState = String(bar.dataset.prevState || '');
+    if (prevState && prevState !== activeState) {
+      bar.classList.add('state-transition');
+      if (stateProgressTransitionTimer) clearTimeout(stateProgressTransitionTimer);
+      stateProgressTransitionTimer = setTimeout(() => {
+        bar.classList.remove('state-transition');
+      }, 380);
+    }
+    bar.dataset.prevState = activeState;
+  }
+
   function updateWorkingView(view, actions = null) {
     currentWorkingView = normalizeWorkingView(view);
+    const progressData = buildStateProgressData(currentWorkingView);
+    currentWorkingView.state = progressData.current_state;
     const normalizedActions = normalizeWorkingActions(actions);
     const state = currentWorkingView.state;
     const isIdleState = !state || state === 'IDLE';
@@ -4226,6 +4949,7 @@ textarea::placeholder,
       && done.length === plan.length;
 
     applyStateBadge(document.getElementById('taskStateBadge'), state);
+    renderStateProgressBar(progressData);
 
     const panel = document.getElementById('taskStatePanel');
     if (panel) {
@@ -4876,6 +5600,9 @@ textarea::placeholder,
     if (!window.marked) return esc(raw).replace(/\n/g, '<br>');
     return marked.parse(String(raw || ''));
   }
+  // Temporarily disabled due to false-positive question-form detection in assistant replies.
+  // Re-enable only after redesigning the detector to an explicit protocol.
+  const QUESTION_FORM_ENABLED = false;
 
   function addCopyButton(pre) {
     if (!pre || pre.querySelector('.btn-copy')) return;
@@ -5523,6 +6250,14 @@ textarea::placeholder,
       }
       let html = '';
       const profile = data.profile || {};
+      const hasProfileData = Boolean(data.has_profile_data);
+      const decisions = data.decisions_top_k || [];
+      const notes = data.notes_top_k || [];
+
+      if (!hasProfileData && !decisions.length && !notes.length) {
+        container.innerHTML = '<div class="dd-memory-working-empty">Профиль и записи пусты</div>';
+        return;
+      }
 
       html += '<div class="dd-profile-section-title">Профиль (canonical)</div>';
       _profileCanonicalOrder.forEach((fieldKey) => {
@@ -5665,7 +6400,6 @@ textarea::placeholder,
         });
       }
 
-      const decisions = data.decisions_top_k || [];
       decisions.forEach((d) => {
         const id = 'lt-d-' + (d.id != null ? d.id : Math.random().toString(36).slice(2));
         const expanded = _memoryLayersExpanded.has(id);
@@ -5681,7 +6415,6 @@ textarea::placeholder,
         if (tagsHtml) html += '<div class="dd-memory-lt-card-tags">' + tagsHtml + '</div>';
         html += '<div class="dd-memory-item-preview">' + esc(text) + (d.full_truncated && expanded ? ' …' : '') + '</div></div>';
       });
-      const notes = data.notes_top_k || [];
       notes.forEach((n) => {
         const id = 'lt-n-' + (n.id != null ? n.id : Math.random().toString(36).slice(2));
         const expanded = _memoryLayersExpanded.has(id);
@@ -5697,11 +6430,7 @@ textarea::placeholder,
         if (tagsHtml) html += '<div class="dd-memory-lt-card-tags">' + tagsHtml + '</div>';
         html += '<div class="dd-memory-item-preview">' + esc(text) + (n.full_truncated && expanded ? ' …' : '') + '</div></div>';
       });
-      if (!Object.keys(profile).length && !decisions.length && !notes.length) {
-        container.innerHTML = '<div class="dd-memory-working-empty">Профиль и записи пусты</div>';
-      } else {
-        container.innerHTML = html;
-      }
+      container.innerHTML = html;
     }
 
     function _toggleExpand(itemId) {
@@ -5710,37 +6439,73 @@ textarea::placeholder,
       if (_memoryLayersCache) updateMemoryLayers(_memoryLayersCache);
     }
 
+    async function _postMemoryLayerAction(endpoint, payload) {
+      const body = {
+        q: _memoryLayersQuery,
+        top_k: 3,
+        session_id: currentSessionId || '',
+        ...(payload || {}),
+      };
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await parseApiResponse(res);
+      if (data && data.snapshot) updateMemoryLayers(data.snapshot);
+      return data;
+    }
+
+    async function clearShortTermMemory() {
+      try {
+        await _postMemoryLayerAction(
+          '/debug/memory/short-term/clear',
+          {}
+        );
+      } catch (err) {
+        console.warn('[DebugMemory] clear short-term failed:', err);
+        _setMemoryLayersError('Не удалось очистить краткосрочную память: ' + esc(err.message));
+      }
+    }
+
     async function clearWorkingMemory() {
       try {
-        const res = await fetch('/debug/memory/working/clear', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ q: _memoryLayersQuery, top_k: 3 }),
-        });
-        const data = await parseApiResponse(res);
-        if (data && data.snapshot) updateMemoryLayers(data.snapshot);
+        await _postMemoryLayerAction(
+          '/debug/memory/working/clear',
+          {}
+        );
       } catch (err) {
         console.warn('[DebugMemory] clear working failed:', err);
+        _setMemoryLayersError('Не удалось очистить рабочую память: ' + esc(err.message));
+      }
+    }
+
+    async function clearLongTermMemory() {
+      const confirmed = window.confirm(
+        'Очистить долговременную память?\n\nЭто удалит профиль, конфликты, decisions, notes и pending-записи пользователя во всех проектах.'
+      );
+      if (!confirmed) return;
+      try {
+        await _postMemoryLayerAction(
+          '/debug/memory/long-term/clear',
+          {}
+        );
+      } catch (err) {
+        console.warn('[DebugMemory] clear long-term failed:', err);
+        _setMemoryLayersError('Не удалось очистить долговременную память: ' + esc(err.message));
       }
     }
 
     async function deleteLongTermEntry(entryType, entryId) {
       if (!entryType || Number.isNaN(Number(entryId))) return;
       try {
-        const res = await fetch('/debug/memory/long-term/delete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+        await _postMemoryLayerAction('/debug/memory/long-term/delete', {
             entry_type: entryType,
             id: Number(entryId),
-            q: _memoryLayersQuery,
-            top_k: 3,
-          }),
-        });
-        const data = await parseApiResponse(res);
-        if (data && data.snapshot) updateMemoryLayers(data.snapshot);
+          });
       } catch (err) {
         console.warn('[DebugMemory] delete long-term failed:', err);
+        _setMemoryLayersError('Не удалось удалить запись из долговременной памяти: ' + esc(err.message));
       }
     }
 
@@ -6179,7 +6944,9 @@ textarea::placeholder,
       switchBranch,
       refreshMemoryLayers,
       updateMemoryLayers,
+      clearShortTermMemory,
       clearWorkingMemory,
+      clearLongTermMemory,
       deleteLongTermEntry,
       saveProfileField,
       deleteProfileField,
@@ -6534,9 +7301,7 @@ textarea::placeholder,
       }
       const finishReason = String((data && data.finish_reason) || '');
       const isStateBlocked = finishReason.startsWith('state_blocked');
-      const msgEl = isStateBlocked
-        ? null
-        : addMsg('bot', (data && data.reply) || '⚠️ Пустой ответ');
+      const msgEl = addMsg('bot', (data && data.reply) || '⚠️ Пустой ответ');
       if (data && data.token_stats) {
         TokenTracker.record(data.token_stats, msgEl);
       }
@@ -6565,13 +7330,26 @@ textarea::placeholder,
     sendMsg(text);
   }
 
+  function insertPromptIntoInput(rawText) {
+    const inp = document.getElementById('userInput');
+    if (!inp) return;
+    const text = String(rawText || '').trim();
+    if (!text) return;
+    inp.value = text;
+    autoResize(inp);
+    inp.focus();
+    if (typeof inp.setSelectionRange === 'function') {
+      const at = inp.value.length;
+      inp.setSelectionRange(at, at);
+    }
+  }
+
   function pulseStateBadge() {
-    const badge = document.getElementById('taskStateBadge');
-    if (!badge) return;
-    badge.style.transition = 'transform 0.15s ease';
-    badge.style.transform = 'scale(1.12)';
+    const node = document.querySelector('#stateProgressTrack .state-progress-item.active .state-progress-node');
+    if (!node) return;
+    node.classList.add('blocked-pulse');
     setTimeout(() => {
-      badge.style.transform = 'scale(1)';
+      node.classList.remove('blocked-pulse');
     }, 200);
   }
 
@@ -6585,7 +7363,7 @@ textarea::placeholder,
     }
     text = text.trim();
     if (!text) return;
-    sendMsg(text);
+    insertPromptIntoInput(text);
   }
 
   function addMsg(role, text) {
@@ -6608,10 +7386,8 @@ textarea::placeholder,
       } else {
         const assistantText = String(text || '');
         const messageId = `msg-${Date.now()}-${++assistantMessageSeq}`;
-        const hasQuestionForm = isQuestionForm(assistantText);
-        bubble.innerHTML = hasQuestionForm
-          ? renderQuestionForm(assistantText, messageId)
-          : renderAssistantMessage(assistantText);
+        const hasQuestionForm = QUESTION_FORM_ENABLED && isQuestionForm(assistantText);
+        bubble.innerHTML = hasQuestionForm ? renderQuestionForm(assistantText, messageId) : renderAssistantMessage(assistantText);
         if (hasQuestionForm) {
           updateFormPreview(messageId);
         }

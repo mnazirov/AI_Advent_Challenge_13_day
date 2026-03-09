@@ -4,7 +4,7 @@
 - web UI на Flask
 - многоуровневой памятью (short-term, working, long-term)
 - state machine задачи (`PLANNING -> EXECUTION -> VALIDATION -> DONE`)
-- debug-интерфейсом для профиля, протокола и памяти
+- debug-интерфейсом для профиля и памяти
 
 ## Что умеет проект
 
@@ -14,7 +14,7 @@
 - Требовать явного подтверждения для перехода `VALIDATION -> DONE`.
 - Автоматически отправлять итоговые сообщения при входе в `VALIDATION` и `DONE`.
 - Хранить долгосрочные решения и заметки пользователя.
-- Показывать отладочные слои памяти и состояние protocol v2.
+- Показывать отладочные слои памяти.
 
 ## Архитектура (кратко)
 
@@ -24,7 +24,6 @@
 - `memory/router.py`: извлечение намерений из user message и запись в память.
 - `memory/manager.py`: гейты состояния, actions для UI, debug-операции.
 - `memory/long_term.py`: профиль, решения, заметки и pending-подтверждения.
-- `memory/protocol.py`: protocol v2 (phase, invariants, next_step).
 - `storage.py`: SQLite слой (`data/agent.db`).
 - `templates/index.html`: UI и debug-панель.
 
@@ -143,9 +142,6 @@ curl -X POST http://localhost:5000/chat \
 - `POST /debug/memory/profile/conflict/resolve`
 - `POST /debug/memory/working/clear`
 - `POST /debug/memory/long-term/delete`
-- `GET /debug/protocol/status`
-- `POST /debug/protocol/profile/confirm-update`
-- `POST /debug/protocol/validate-type2`
 - `POST /debug/ctx-strategy`
 - `POST /ctx/checkpoint`
 - `POST /ctx/fork`

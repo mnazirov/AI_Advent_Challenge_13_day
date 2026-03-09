@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import Enum
 import json
 import logging
 import os
@@ -11,37 +13,91 @@ from typing import Any
 from context_strategies import ContextStrategyManager
 from llm import OpenAILLMClient
 from memory import MemoryManager, TaskContext, TaskState
+from memory.response_invariants import ParsedMarkers, ResponseSignals, parse_response_markers, validate_response
 from storage import ensure_session
 
-SYSTEM_PROMPT = """You are an iOS product engineering assistant.
-Your mission is to help the user build and launch iOS apps from idea to monetization (subscriptions) and growth.
-Primary stack: Swift + SwiftUI. Mention UIKit only when needed.
-Final user-facing reply must be in Russian unless the user asks for another language.
+SYSTEM_PROMPT = """You are a smart, concise, and helpful assistant on iOS. 
+You are integrated into the user's daily workflow and have access 
+to their device context.
 
-Core capabilities:
-- iOS architecture, Swift/SwiftUI implementation, testing, App Store release flow.
-- Monetization: StoreKit 2, RevenueCat integration, paywall strategy, onboarding-to-conversion flow.
-- Product iteration: analytics setup, conversion optimization, growth loops.
+## Core Behavior
+- Always respond in the user's language (auto-detect)
+- Keep responses SHORT — optimized for voice playback and glanceable text
+- Prioritize actionable answers over lengthy explanations
+- Never ask more than ONE clarifying question at a time
 
-Response behavior:
-- Think internally first, then provide user-facing answer.
-- If clarification is needed, ask with numbered options (1, 2, 3) and ask user to reply with a number.
-- Keep answers practical and code-oriented where relevant.
-- End every user-facing answer with one clear next action sentence in natural language.
+## Tone & Style
+- Friendly but efficient — no filler phrases like "Great question!"
+- Use plain language, avoid jargon unless user is technical
+- For voice: use natural speech patterns, no markdown, no bullet points
+- For text: use minimal formatting, emojis only when contextually appropriate
 
-Output format (strict):
-- Always return two sections:
-  <internal>...hidden analysis, checks, state updates...</internal>
-  <external>...human-friendly answer for the user...</external>
-- Never include internal tags, metadata, state names, or invariant labels inside <external>.
+## Response Format Rules
+- Simple facts → 1 sentence
+- Instructions → numbered steps, max 5
+- Ambiguous requests → make a reasonable assumption, state it briefly, then answer
+- Unknown info → say so clearly, suggest where to find it
 
-Safety:
-- Do not invent APIs that do not exist.
-- Mention iOS/version constraints when relevant.
-- Prefer robust maintainable solutions over quick hacks.
+## Capabilities Awareness
+- You CAN: set reminders, answer questions, draft messages, 
+  summarize content, translate, calculate, suggest actions
+- You CANNOT: access real-time data unless tools are provided, 
+  make calls/purchases without explicit confirmation
+
+## Safety & Confirmation
+- Always confirm before: sending messages, making purchases, 
+  deleting data, sharing personal information
+- For sensitive actions say: "Just to confirm — [action]. Proceed?"
+
+## Context Handling
+- Remember context within the current session
+- If user seems rushed → ultra-short replies
+- If user seems exploratory → slightly more detail is okay
 """
 
 logger = logging.getLogger("agent")
+
+
+@dataclass(frozen=True)
+class MarkerNormalizationEvent:
+    parsed: ParsedMarkers
+    reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class StepNormalizationContext:
+    current_step_in_memory: int
+    total_steps: int
+    response_signals: ResponseSignals
+
+
+class RollbackReason(str, Enum):
+    EXPLICIT_MARKER = "explicit_marker"
+    USER_PLAN_CHANGE = "user_plan_change"
+    CRITICAL_INVARIANT = "critical_invariant"
+    NOT_ALLOWED = "not_allowed"
+
+
+@dataclass(frozen=True)
+class RollbackDecision:
+    should_rollback: bool
+    reason: RollbackReason
+
+
+class RollbackPolicy:
+    """Single source of truth for rollback eligibility."""
+
+    ALLOWED_REASONS: frozenset[RollbackReason] = frozenset(
+        {
+            RollbackReason.EXPLICIT_MARKER,
+            RollbackReason.USER_PLAN_CHANGE,
+            RollbackReason.CRITICAL_INVARIANT,
+        }
+    )
+
+    @classmethod
+    def is_allowed(cls, reason: RollbackReason) -> bool:
+        return reason in cls.ALLOWED_REASONS
 
 
 class IOSAgent:
@@ -123,53 +179,29 @@ class IOSAgent:
         logger.info("[MODEL] Модель переключена на %s", validated)
         return validated
 
-    def build_protocol_header(self, *, session_id: str, user_id: str, invariant_report: dict | None = None) -> dict:
-        return self.memory.build_protocol_header(
-            session_id=session_id,
-            user_id=user_id,
-            invariant_report=invariant_report,
-        )
-
-    def evaluate_invariants(self, *, run_external: bool = False) -> dict:
-        return self.memory.evaluate_invariants(run_external=run_external)
-
-    def prepare_protocol_turn(self, *, session_id: str, user_id: str, user_message: str) -> dict:
-        return self.memory.prepare_protocol_turn(
-            session_id=session_id,
-            user_id=user_id,
-            user_message=user_message,
-        )
-
-    def ensure_protocol_profile(self, *, user_id: str) -> dict:
-        return self.memory.ensure_protocol_profile(user_id=user_id)
-
-    def propose_profile_update(self, *, user_id: str, updates: dict, reason: str = "user_request") -> dict:
-        return self.memory.propose_profile_update(user_id=user_id, updates=updates, reason=reason)
-
-    def confirm_profile_update(self, *, user_id: str, accept: bool = True) -> dict:
-        return self.memory.confirm_profile_update(user_id=user_id, accept=accept)
-
-    def chat(self, user_message: str, session_id: str | None = None, user_id: str | None = None) -> str:
+    def chat(
+        self,
+        user_message: str,
+        session_id: str | None = None,
+        user_id: str | None = None,
+        client_intent: dict[str, Any] | None = None,
+    ) -> str:
         """Handles one chat turn with memory-aware prompt building."""
         t_start = perf_counter()
 
         current_session_id = str(session_id or "default_session")
         current_user_id = str(user_id or self.DEFAULT_USER_ID)
         ensure_session(current_session_id)
+        self.memory.begin_turn_aux_budget(limit=12)
         ctx_before_turn = self.memory.working.load(current_session_id)
         state_before_turn = ctx_before_turn.state if ctx_before_turn else None
-
-        protocol_turn = self.prepare_protocol_turn(
-            session_id=current_session_id,
-            user_id=current_user_id,
-            user_message=user_message,
-        )
 
         gate_response = self._handle_planning_gate(
             session_id=current_session_id,
             user_id=current_user_id,
             user_message=user_message,
             started_at=t_start,
+            client_intent=client_intent,
         )
         state_after_gate_ctx = self.memory.working.load(current_session_id)
         state_after_gate = state_after_gate_ctx.state if state_after_gate_ctx else None
@@ -188,11 +220,23 @@ class IOSAgent:
         if gate_response is not None:
             return gate_response
 
+        if self._is_memory_recall_request(user_message):
+            return self._finalize_non_llm_response(
+                session_id=current_session_id,
+                user_id=current_user_id,
+                user_message=user_message,
+                assistant_message=self._build_memory_recall_response(),
+                started_at=t_start,
+                finish_reason="memory_recall",
+                apply_hard_constraints=False,
+            )
+
         state_before_route = state_after_gate
         self.memory.route_user_message(
             session_id=current_session_id,
             user_id=current_user_id,
             user_message=user_message,
+            client_intent=client_intent,
         )
         state_after_route_ctx = self.memory.working.load(current_session_id)
         state_after_route = state_after_route_ctx.state if state_after_route_ctx else None
@@ -206,6 +250,15 @@ class IOSAgent:
         )
         if auto_after_route is not None:
             return auto_after_route
+        gate_after_route = self._handle_planning_gate(
+            session_id=current_session_id,
+            user_id=current_user_id,
+            user_message=user_message,
+            started_at=t_start,
+            client_intent=client_intent,
+        )
+        if gate_after_route is not None:
+            return gate_after_route
 
         shortcut_response = self._handle_state_shortcuts(
             session_id=current_session_id,
@@ -230,38 +283,86 @@ class IOSAgent:
                 self.ctx.strategy.update_facts(user_message=user_message, history=self.conversation_history)
             except Exception as exc:
                 logger.warning("[CTX][sticky_facts] update skipped: %s", exc)
+            self._backfill_sticky_goal_from_working(session_id=current_session_id)
 
         messages, prompt_preview, read_meta = self.memory.build_messages(
             session_id=current_session_id,
             user_id=current_user_id,
             system_instructions=SYSTEM_PROMPT,
-            data_context=str(protocol_turn.get("internal_context") or ""),
+            data_context="",
             user_query=user_message,
         )
         self.last_prompt_preview = prompt_preview
 
-        response = self._create_chat_completion(
-            model=self.model,
-            messages=messages,
-            max_tokens=4096,
-            temperature=0.7,
-        )
+        protocol_meta: dict[str, Any] = {}
+        assistant_message = ""
+        finish_reason = "stop"
+        prompt_tokens = 0
+        completion_tokens = 0
+        attempt_messages = list(messages)
 
-        finish_reason = getattr(response.choices[0], "finish_reason", None)
-        raw_reply = response.choices[0].message.content or ""
-        internal_trace, external_text = self._split_internal_external(raw_reply)
-        assistant_message = self._sanitize_reply_text(external_text)
-        if not assistant_message:
-            assistant_message = "Не удалось сформировать ответ. Уточните задачу или добавьте контекст."
-        elif finish_reason == "length":
-            assistant_message = assistant_message.rstrip() + "\n\n_Ответ обрезан по длине. Можно попросить продолжить._"
-        assistant_message, protocol_meta = self._finalize_external_message(
-            session_id=current_session_id,
-            user_id=current_user_id,
-            text=assistant_message,
-            internal_trace=internal_trace,
-            protocol_turn=protocol_turn,
-        )
+        for attempt in range(2):
+            response = self._create_chat_completion(
+                model=self.model,
+                messages=attempt_messages,
+                max_tokens=4096,
+                temperature=0.7,
+            )
+            finish_reason = str(getattr(response.choices[0], "finish_reason", "") or "stop")
+            raw_reply = response.choices[0].message.content or ""
+            parsed = parse_response_markers(raw_reply)
+
+            usage = getattr(response, "usage", None)
+            prompt_tokens += int(getattr(usage, "prompt_tokens", 0) or 0)
+            completion_tokens += int(getattr(usage, "completion_tokens", 0) or 0)
+
+            candidate_text = self._sanitize_reply_text(parsed.external)
+            if not candidate_text:
+                candidate_text = "Не удалось сформировать ответ. Уточните задачу или добавьте контекст."
+            elif finish_reason == "length":
+                candidate_text = candidate_text.rstrip() + "\n\n_Ответ обрезан по длине. Можно попросить продолжить._"
+
+            assistant_message, protocol_meta = self._finalize_external_message(
+                session_id=current_session_id,
+                user_id=current_user_id,
+                text=candidate_text,
+                internal_trace=parsed.internal,
+                raw_response=raw_reply,
+                source="llm",
+                last_user_message=user_message,
+            )
+            invariant_report = protocol_meta.get("invariant_report") or {}
+            if invariant_report.get("overall_status") == "ok":
+                break
+
+            can_retry = bool(invariant_report.get("can_retry", False))
+            if attempt == 0 and can_retry:
+                retry_prompt = self._build_invariant_retry_prompt(invariant_report)
+                attempt_messages = list(messages)
+                attempt_messages.append({"role": "assistant", "content": raw_reply})
+                attempt_messages.append({"role": "user", "content": retry_prompt})
+                logger.warning("[INVARIANT] Retry requested: %s", invariant_report.get("explanation"))
+                continue
+
+            finish_reason = "invariant_fail"
+            planning_recovery = self._recover_invariant_fail_from_planning(
+                session_id=current_session_id,
+                user_id=current_user_id,
+                user_message=user_message,
+            )
+            if planning_recovery is not None:
+                assistant_message = str(planning_recovery.get("assistant_message") or "")
+                protocol_meta = dict(planning_recovery.get("protocol_meta") or {})
+                finish_reason = str(planning_recovery.get("finish_reason") or "stop")
+                prompt_tokens += int(planning_recovery.get("prompt_tokens", 0) or 0)
+                completion_tokens += int(planning_recovery.get("completion_tokens", 0) or 0)
+                read_meta_recovered = planning_recovery.get("read_meta")
+                if isinstance(read_meta_recovered, dict):
+                    read_meta = read_meta_recovered
+                break
+
+            assistant_message = self._build_invariant_failure_user_message(invariant_report)
+            break
 
         self.memory.append_turn(
             session_id=current_session_id,
@@ -269,11 +370,7 @@ class IOSAgent:
             assistant_message=assistant_message,
         )
         self._append_history(user_message=user_message, assistant_message=assistant_message)
-
-        usage = getattr(response, "usage", None)
-        prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
-        completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
-        total_tokens = int(getattr(usage, "total_tokens", prompt_tokens + completion_tokens) or 0)
+        total_tokens = int(prompt_tokens + completion_tokens)
         cost_usd = self._estimate_cost(prompt_tokens, completion_tokens)
         latency_ms = int(round((perf_counter() - t_start) * 1000))
 
@@ -296,11 +393,8 @@ class IOSAgent:
             "finish_reason": finish_reason,
             "working_view": self.memory.get_working_view(session_id=current_session_id),
             "working_actions": self.memory.get_working_actions(session_id=current_session_id),
-            "protocol_header": None,
-            "protocol_state": protocol_meta.get("protocol_state"),
             "invariant_report": protocol_meta.get("invariant_report"),
-            "next_step": protocol_meta.get("next_step"),
-            "internal_trace": internal_trace,
+            "internal_trace": protocol_meta.get("internal_trace", ""),
         }
         logger.info(
             "[CHAT] in=%s out=%s total=%s cost=$%.6f model=%s",
@@ -324,7 +418,9 @@ class IOSAgent:
         self.memory.clear_session(session_id=session_id)
 
     def restore_memory_session(self, session_id: str, messages: list[dict[str, str]] | None = None) -> None:
-        _ = messages
+        if messages:
+            self.memory.hydrate_short_term(session_id=session_id, messages=messages)
+            return
         self.memory.short_term.get_context(session_id)
 
     def _handle_planning_gate(
@@ -334,12 +430,14 @@ class IOSAgent:
         user_id: str,
         user_message: str,
         started_at: float,
+        client_intent: dict[str, Any] | None = None,
     ) -> str | None:
         guard_ctx_before = self.memory.working.load(session_id)
         gate_message = self.memory.enforce_planning_gate(
             session_id=session_id,
             user_message=user_message,
             user_id=user_id,
+            client_intent=client_intent,
         )
         if gate_message == self.memory.VALIDATION_CONFIRMED_SIGNAL:
             return self._finalize_done_transition(
@@ -354,15 +452,7 @@ class IOSAgent:
         is_planning_block = bool(guard_ctx_before and guard_ctx_before.state.value == "PLANNING")
         finish_reason = "state_blocked_planning" if is_planning_block else "state_blocked"
         if is_planning_block:
-            goal = str(guard_ctx_before.task or "Текущая задача").strip() or "Текущая задача"
-            if "утверж" in gate_message.lower():
-                assistant_message = self._sanitize_reply_text(gate_message)
-            else:
-                assistant_message = self._sanitize_reply_text(
-                    f"Задача создана: '{goal}'.\n"
-                    "Чтобы перейти к выполнению, сначала сформируйте план.\n"
-                    "Опишите шаги вручную или выберите действие автоматической генерации плана."
-                )
+            assistant_message = self._sanitize_reply_text(gate_message)
         else:
             if guard_ctx_before and guard_ctx_before.state == TaskState.VALIDATION:
                 assistant_message = self._sanitize_reply_text(gate_message)
@@ -498,14 +588,6 @@ class IOSAgent:
             self.memory.working.transition_state(ctx, TaskState.DONE)
             ctx.updated_at = datetime.utcnow().isoformat()
             self.memory.working.save(ctx)
-            self.memory.set_protocol_state_meta(
-                user_id=user_id,
-                patch={
-                    "awaiting_skip_confirmation": False,
-                    "validation_skipped_by_user": False,
-                    "validation_skip_note": "",
-                },
-            )
         except ValueError as exc:
             return self._finalize_non_llm_response(
                 session_id=session_id,
@@ -536,8 +618,8 @@ class IOSAgent:
             "Перед тем как зафиксировать результат:\n"
             "1. Всё ли работает как ожидалось?\n"
             "2. Есть ли замечания или что-то требует доработки?\n\n"
-            "Если всё в порядке — нажмите «Подтвердить завершение».\n"
-            "Если нужна доработка — нажмите «Вернуться к выполнению»."
+            "Если есть замечания — опишите их сообщением, вернёмся к доработке.\n"
+            "Если замечаний нет — продолжим автоматически."
         )
 
     def build_done_summary_prompt(self, task: TaskContext) -> str:
@@ -610,6 +692,34 @@ class IOSAgent:
             started_at=started_at,
             finish_reason="state_blocked_planning",
         )
+
+    def _backfill_sticky_goal_from_working(self, *, session_id: str) -> None:
+        if self.ctx.active != "sticky_facts":
+            return
+        strategy = self.ctx.strategy
+        facts = getattr(strategy, "facts", None)
+        if not isinstance(facts, dict):
+            return
+        if str(facts.get("goal") or "").strip():
+            return
+
+        extract_meta = self.memory.router.get_last_working_extract_meta(session_id)
+        extract_applied = bool(extract_meta.get("applied"))
+        try:
+            extract_confidence = float(extract_meta.get("confidence", 0.0) or 0.0)
+        except Exception:
+            extract_confidence = 0.0
+        if extract_applied or extract_confidence >= 0.7:
+            return
+
+        working_ctx = self.memory.working.load(session_id)
+        if not working_ctx:
+            return
+        task_goal = str(working_ctx.task or "").strip()
+        if not task_goal:
+            return
+        facts["goal"] = task_goal
+        logger.info("[WORKING_EXTRACT_FALLBACK] goal взят из working.task: %s", task_goal)
 
     def _handle_state_shortcuts(
         self,
@@ -696,7 +806,7 @@ class IOSAgent:
                     finish_reason="state_execution_code",
                 )
 
-        if ctx.state == TaskState.VALIDATION and self._is_checklist_request(msg):
+        if ctx.state == TaskState.VALIDATION and self.memory.is_validation_checklist_request(msg):
             assistant_message = (
                 "Финальный чеклист перед отправкой:\n"
                 "1. Поля email и пароль валидируются до отправки.\n"
@@ -769,11 +879,6 @@ class IOSAgent:
         return any(marker in lower for marker in markers)
 
     @staticmethod
-    def _is_checklist_request(message: str) -> bool:
-        lower = str(message or "").lower()
-        return "чеклист" in lower or "checklist" in lower
-
-    @staticmethod
     def _is_next_steps_request(message: str) -> bool:
         lower = str(message or "").lower()
         markers = ["что дальше", "дальше рекоменду", "следующие шаги", "what next"]
@@ -793,18 +898,16 @@ class IOSAgent:
         assistant_message: str,
         started_at: float,
         finish_reason: str,
+        apply_hard_constraints: bool = True,
     ) -> str:
-        protocol_turn = self.prepare_protocol_turn(
-            session_id=session_id,
-            user_id=user_id,
-            user_message=user_message,
-        )
         formatted_message, protocol_meta = self._finalize_external_message(
             session_id=session_id,
             user_id=user_id,
             text=assistant_message,
             internal_trace="",
-            protocol_turn=protocol_turn,
+            apply_hard_constraints=apply_hard_constraints,
+            source="non_llm",
+            last_user_message=user_message,
         )
         self.memory.append_turn(
             session_id=session_id,
@@ -844,11 +947,8 @@ class IOSAgent:
             "finish_reason": finish_reason,
             "working_view": self.memory.get_working_view(session_id=session_id),
             "working_actions": self.memory.get_working_actions(session_id=session_id),
-            "protocol_header": None,
-            "protocol_state": protocol_meta.get("protocol_state"),
             "invariant_report": protocol_meta.get("invariant_report"),
-            "next_step": protocol_meta.get("next_step"),
-            "internal_trace": "",
+            "internal_trace": protocol_meta.get("internal_trace", ""),
         }
         return formatted_message
 
@@ -859,61 +959,88 @@ class IOSAgent:
         user_id: str,
         text: str,
         internal_trace: str,
-        protocol_turn: dict[str, Any] | None = None,
+        apply_hard_constraints: bool = True,
+        raw_response: str | None = None,
+        source: str = "non_llm",
+        last_user_message: str = "",
     ) -> tuple[str, dict[str, Any]]:
-        runtime = protocol_turn or self.prepare_protocol_turn(
+        payload_raw = raw_response if raw_response is not None else self._build_marker_payload(text=text, session_id=session_id)
+        parsed = parse_response_markers(payload_raw)
+
+        marker_events: list[dict[str, Any]] = []
+        raw_marker_event = self._apply_parsed_markers_to_working(
             session_id=session_id,
-            user_id=user_id,
-            user_message="",
+            parsed=parsed,
+            event_source="raw",
+            last_user_message=last_user_message,
         )
-        next_step = str(runtime.get("next_step") or "").strip()
-        cleaned = self._strip_internal_artifacts(self._sanitize_reply_text(text))
-        cleaned = self._enforce_hard_constraints_on_reply(user_id=user_id, reply=cleaned)
+        if raw_marker_event:
+            marker_events.append(raw_marker_event)
+        guard_event = self._run_execution_guard(
+            session_id=session_id,
+            response_signals=parsed.to_response_signals(),
+        )
+        if guard_event:
+            marker_events.append(guard_event)
+
+        cleaned = self._strip_internal_artifacts(self._sanitize_reply_text(parsed.external or text))
+        if apply_hard_constraints:
+            cleaned = self._enforce_hard_constraints_on_reply(user_id=user_id, reply=cleaned)
         if not cleaned:
             cleaned = "Готово, продолжаем."
 
         normalized = cleaned.rstrip()
-        if next_step and next_step.lower() not in normalized.lower():
-            if not re.search(r"[.!?]\s*$", normalized):
-                normalized += "."
-            normalized += f"\n\nЕсли ок, следующим шагом {next_step}."
+
+        validation_report, parsed_for_validation, normalization_event = self._run_post_validation(
+            session_id=session_id,
+            parsed=parsed,
+            source=source,
+            fallback_text=normalized,
+        )
+        if normalization_event is not None:
+            normalized_event = self._apply_parsed_markers_to_working(
+                session_id=session_id,
+                parsed=normalization_event.parsed,
+                event_source="normalization",
+                last_user_message=last_user_message,
+            )
+            if normalized_event:
+                marker_events.append(normalized_event)
+            guard_after_normalization = self._run_execution_guard(
+                session_id=session_id,
+                response_signals=normalization_event.parsed.to_response_signals(),
+            )
+            if guard_after_normalization:
+                marker_events.append(guard_after_normalization)
+        if validation_report.get("overall_status") != "ok":
+            normalized = self._build_invariant_failure_user_message(validation_report)
 
         meta = {
-            "protocol_state": runtime.get("protocol_state") or {},
-            "invariant_report": runtime.get("invariant_report") or {},
-            "next_step": next_step,
-            "internal_trace": internal_trace,
+            "invariant_report": validation_report,
+            "internal_trace": parsed.internal or internal_trace,
+            "parsed_markers": parsed_for_validation.to_dict(),
+            "parsed_markers_raw": parsed.to_dict(),
+            "marker_events": marker_events,
         }
         return normalized.strip(), meta
 
     def _split_internal_external(self, text: str) -> tuple[str, str]:
+        parsed = parse_response_markers(str(text or ""))
+        if parsed.external:
+            return parsed.internal, parsed.external
         raw = str(text or "")
         if not raw.strip():
             return "", ""
-
-        internal = ""
-        external = raw
-
-        internal_match = re.search(r"<internal>(.*?)</internal>", raw, flags=re.IGNORECASE | re.DOTALL)
-        if internal_match:
-            internal = str(internal_match.group(1) or "").strip()
-
-        external_match = re.search(r"<external>(.*?)</external>", raw, flags=re.IGNORECASE | re.DOTALL)
-        if external_match:
-            external = str(external_match.group(1) or "").strip()
-        else:
-            external = re.sub(r"<internal>.*?</internal>", "", external, flags=re.IGNORECASE | re.DOTALL).strip()
-            external = re.sub(r"</?external>", "", external, flags=re.IGNORECASE).strip()
-
-        if not external:
-            try:
-                parsed = json.loads(raw)
-                if isinstance(parsed, dict):
-                    external = str(parsed.get("external") or "").strip()
-                    internal = str(parsed.get("internal") or internal).strip()
-            except Exception:
-                external = ""
-        return internal, external or raw.strip()
+        try:
+            parsed_json = json.loads(raw)
+            if isinstance(parsed_json, dict):
+                return (
+                    str(parsed_json.get("internal") or "").strip(),
+                    str(parsed_json.get("external") or "").strip(),
+                )
+        except Exception:
+            pass
+        return parsed.internal, raw.strip()
 
     def _strip_internal_artifacts(self, text: str) -> str:
         source = str(text or "").strip()
@@ -929,8 +1056,623 @@ class IOSAgent:
                 continue
             if lower.startswith("inv:") or lower.startswith("next:"):
                 continue
+            if re.match(r"^\[step_done:\s*\d+\]\s*$", line.strip(), flags=re.IGNORECASE):
+                continue
+            if re.match(r"^\[next_state:\s*[a-z_]+\]\s*$", line.strip(), flags=re.IGNORECASE):
+                continue
+            if re.match(r"^\[validation_ok\]\s*$", line.strip(), flags=re.IGNORECASE):
+                continue
+            if re.match(r"^\[validation_fail:\s*.*\]\s*$", line.strip(), flags=re.IGNORECASE):
+                continue
+            if re.match(r"^\[done:\s*.*\]\s*$", line.strip(), flags=re.IGNORECASE):
+                continue
+            if re.match(r"^\[open_question:\s*.*\]\s*$", line.strip(), flags=re.IGNORECASE):
+                continue
+            if re.match(r"^\[code_artifact(?:\s*:\s*.*)?\]\s*$", line.strip(), flags=re.IGNORECASE):
+                continue
             cleaned_lines.append(line)
         return "\n".join(cleaned_lines).strip()
+
+    def _build_state_object_payload(self, *, session_id: str) -> dict[str, Any]:
+        ctx = self.memory.working.load(session_id)
+        if ctx:
+            return {
+                "task": str(ctx.task or ""),
+                "state": str(ctx.state.value),
+                "plan": list(ctx.plan),
+                "current_step": ctx.current_step,
+                "done": list(ctx.done),
+                "artifacts": [a.to_dict() for a in (ctx.artifacts or [])],
+                "open_questions": list(ctx.open_questions),
+            }
+        return {
+            "task": "",
+            "state": "PLANNING",
+            "plan": [],
+            "current_step": None,
+            "done": [],
+            "artifacts": [],
+            "open_questions": [],
+        }
+
+    def _build_marker_payload(self, *, text: str, session_id: str) -> str:
+        state_payload = self._build_state_object_payload(session_id=session_id)
+        done_count = len(state_payload.get("done") or [])
+        state_value = str(state_payload.get("state") or "PLANNING").strip().upper() or "PLANNING"
+        return (
+            "<internal>\n"
+            f"[STEP_DONE: {done_count}]\n"
+            f"[NEXT_STATE: {state_value}]\n"
+            "[VALIDATION_OK]\n"
+            "</internal>\n"
+            "<external>\n"
+            f"{str(text or '').strip()}\n"
+            "</external>"
+        )
+
+    def _run_post_validation(
+        self,
+        *,
+        session_id: str,
+        parsed: ParsedMarkers,
+        source: str,
+        fallback_text: str,
+    ) -> tuple[dict[str, Any], ParsedMarkers, MarkerNormalizationEvent | None]:
+        try:
+            state_payload = self._build_state_object_payload(session_id=session_id)
+            parsed_for_validation = parsed
+            normalization_event: MarkerNormalizationEvent | None = None
+            marker_reasons: list[str] = []
+            expected_done = len(state_payload.get("done") or [])
+            marker_shape_invalid = (
+                parsed.step_done is None
+                or not bool(parsed.next_state_marker_present)
+                or not parsed.has_validation_marker()
+                or (parsed.step_done is not None and parsed.step_done != expected_done)
+            )
+            if source == "llm" and marker_shape_invalid:
+                parsed_for_validation, marker_reasons = self._normalize_markers_for_validation(
+                    parsed=parsed,
+                    state_payload=state_payload,
+                    fallback_text=fallback_text,
+                )
+                normalization_event = MarkerNormalizationEvent(
+                    parsed=parsed_for_validation,
+                    reasons=tuple(marker_reasons),
+                )
+                logger.info(
+                    "[INVARIANT] marker normalization applied source=%s reasons=%s",
+                    source,
+                    ",".join(marker_reasons) if marker_reasons else "none",
+                )
+
+            allowed_transitions = {
+                str(src.value): {str(dst.value) for dst in dst_set}
+                for src, dst_set in self.memory.working.ALLOWED_TRANSITIONS.items()
+            }
+            report = validate_response(
+                parsed=parsed_for_validation,
+                state_object=state_payload,
+                allowed_transitions=allowed_transitions,
+            ).to_dict()
+            if normalization_event is not None:
+                report["normalization"] = list(normalization_event.reasons)
+            if report.get("overall_status") != "ok":
+                report["can_retry"] = bool(source == "llm")
+            return report, parsed_for_validation, normalization_event
+        except Exception as exc:
+            logger.exception("[INVARIANT] post-validation crashed: %s", exc)
+            report = {
+                "overall_status": "fail",
+                "violations": [{"code": "VALIDATOR_EXCEPTION", "message": str(exc)}],
+                "can_retry": False,
+                "explanation": f"Не удалось проверить инварианты: {exc}",
+            }
+            return report, parsed, None
+
+    def _normalize_markers_for_validation(
+        self,
+        *,
+        parsed: ParsedMarkers,
+        state_payload: dict[str, Any],
+        fallback_text: str,
+    ) -> tuple[ParsedMarkers, list[str]]:
+        reasons: list[str] = []
+        done_in_memory = len(state_payload.get("done") or [])
+        total_steps = len(state_payload.get("plan") or [])
+        response_signals = parsed.to_response_signals()
+        inferred_step_done = self._infer_completed_step(
+            StepNormalizationContext(
+                current_step_in_memory=done_in_memory,
+                total_steps=total_steps,
+                response_signals=response_signals,
+            )
+        )
+
+        step_done_value = parsed.step_done
+        if step_done_value is None:
+            reasons.append("missing_step_done")
+            step_done_value = inferred_step_done
+            logger.info(
+                "[STEP_NORMALIZE] inferred step_done=%s (memory=%s total=%s code=%s done=%s open_q=%s)",
+                step_done_value,
+                done_in_memory,
+                total_steps,
+                response_signals.has_code_artifact,
+                response_signals.has_done_phrase,
+                response_signals.has_open_question,
+            )
+        elif step_done_value != done_in_memory:
+            reasons.append("step_done_mismatch")
+            step_done_value = max(done_in_memory, inferred_step_done)
+            logger.info(
+                "[STEP_NORMALIZE] realigned step_done=%s (raw=%s memory=%s total=%s)",
+                step_done_value,
+                parsed.step_done,
+                done_in_memory,
+                total_steps,
+            )
+
+        current_state = self._parse_task_state(state_payload.get("state"))
+        normalized_state = self._parse_task_state(parsed.next_state)
+        if normalized_state is None:
+            reasons.append("missing_or_invalid_next_state")
+            normalized_state = current_state or TaskState.PLANNING
+
+        validation_marker = "[VALIDATION_OK]"
+        if parsed.validation_fail_reason:
+            validation_marker = f"[VALIDATION_FAIL: {parsed.validation_fail_reason}]"
+        elif not parsed.validation_ok:
+            reasons.append("missing_validation_marker")
+
+        done_marker = f"[DONE: {parsed.done_note}]" if parsed.done_note else ""
+        open_question_marker = f"[OPEN_QUESTION: {parsed.open_question_note}]" if parsed.open_question_note else ""
+        code_artifact_marker = (
+            f"[CODE_ARTIFACT: {parsed.code_artifact_note}]"
+            if parsed.code_artifact_note and parsed.code_artifact_note != "fenced_code"
+            else ("[CODE_ARTIFACT]" if parsed.code_artifact_note else "")
+        )
+
+        payload = (
+            "<internal>\n"
+            f"[STEP_DONE: {int(step_done_value)}]\n"
+            f"[NEXT_STATE: {normalized_state.value}]\n"
+            f"{validation_marker}\n"
+            f"{done_marker}\n"
+            f"{open_question_marker}\n"
+            f"{code_artifact_marker}\n"
+            "</internal>\n"
+            "<external>\n"
+            f"{str(fallback_text or '').strip()}\n"
+            "</external>"
+        )
+        return parse_response_markers(payload), reasons
+
+    @staticmethod
+    def _infer_completed_step(ctx: StepNormalizationContext) -> int:
+        current = max(0, int(ctx.current_step_in_memory))
+        total = max(0, int(ctx.total_steps))
+        signals = ctx.response_signals
+
+        if total <= 0:
+            return current
+        if signals.has_code_artifact and signals.has_done_phrase and not signals.has_open_question:
+            return total
+        if signals.has_code_artifact:
+            return min(total, current + 1)
+        return min(total, current)
+
+    @staticmethod
+    def _parse_task_state(value: object) -> TaskState | None:
+        raw = str(value or "").strip().upper()
+        if not raw:
+            return None
+        try:
+            return TaskState(raw)
+        except ValueError:
+            return None
+
+    def _apply_parsed_markers_to_working(
+        self,
+        *,
+        session_id: str,
+        parsed: ParsedMarkers,
+        event_source: str,
+        last_user_message: str,
+    ) -> dict[str, Any] | None:
+        ctx = self.memory.working.load(session_id)
+        if ctx is None:
+            return None
+
+        event: dict[str, Any] = {"source": event_source, "step_applied": False, "state_applied": False}
+
+        if parsed.step_done is not None:
+            plan_len = len(ctx.plan)
+            target_done = max(0, min(int(parsed.step_done), plan_len))
+            before_done = len(ctx.done)
+            while True:
+                fresh_ctx = self.memory.working.load(session_id)
+                if fresh_ctx is None:
+                    break
+                if len(fresh_ctx.done) >= target_done:
+                    break
+                if fresh_ctx.state != TaskState.EXECUTION:
+                    logger.warning(
+                        "[STEP_BLOCKED] marker step_done=%s source=%s state=%s",
+                        target_done,
+                        event_source,
+                        fresh_ctx.state.value,
+                    )
+                    break
+                try:
+                    self.memory.working.complete_current_step(session_id=session_id)
+                except ValueError as exc:
+                    logger.warning(
+                        "[STEP_BLOCKED] marker step_done=%s source=%s reason=%s",
+                        target_done,
+                        event_source,
+                        exc,
+                    )
+                    break
+
+            after_ctx = self.memory.working.load(session_id)
+            after_done = len(after_ctx.done) if after_ctx else before_done
+            if after_done > before_done:
+                event["step_applied"] = True
+                event["step_target"] = target_done
+                event["step_done"] = after_done
+                logger.info(
+                    "[STEP_UPDATE] current_step=%s applied after %s",
+                    after_done,
+                    event_source,
+                )
+                logger.info(
+                    "[STEP_WRITTEN] current_step=%s сохранён в working layer",
+                    after_done,
+                )
+
+        next_state = self._parse_task_state(parsed.next_state)
+        if next_state is not None:
+            state_ctx = self.memory.working.load(session_id)
+            if state_ctx is not None and state_ctx.state != next_state:
+                rollback_decision = self._decide_execution_rollback(
+                    current_state=state_ctx.state,
+                    parsed=parsed,
+                    event_source=event_source,
+                    last_user_message=last_user_message,
+                    user_plan_change=False,
+                    critical_violation=False,
+                )
+                if state_ctx.state == TaskState.EXECUTION and next_state == TaskState.PLANNING:
+                    if not rollback_decision.should_rollback:
+                        logger.info(
+                            "[ROLLBACK_SKIP] %s -> %s source=%s reason=%s",
+                            state_ctx.state.value,
+                            next_state.value,
+                            event_source,
+                            rollback_decision.reason.value,
+                        )
+                        next_state = None
+                    else:
+                        logger.info(
+                            "[ROLLBACK_DECISION] %s -> %s source=%s reason=%s",
+                            state_ctx.state.value,
+                            next_state.value,
+                            event_source,
+                            rollback_decision.reason.value,
+                        )
+                if next_state is None:
+                    allowed = False
+                else:
+                    allowed = next_state in self.memory.working.ALLOWED_TRANSITIONS.get(state_ctx.state, set())
+                if not allowed:
+                    if next_state is not None:
+                        logger.warning(
+                            "[STATE_BLOCKED] нормализованный переход %s -> %s запрещён",
+                            state_ctx.state.value,
+                            next_state.value,
+                        )
+                else:
+                    old_state = state_ctx.state
+                    try:
+                        self.memory.working.transition_state(state_ctx, next_state)
+                        state_ctx.updated_at = datetime.utcnow().isoformat()
+                        self.memory.working.save(state_ctx)
+                        event["state_applied"] = True
+                        event["state_from"] = old_state.value
+                        event["state_to"] = next_state.value
+                        logger.info(
+                            "[STATE_UPDATE] %s -> %s applied after %s",
+                            old_state.value,
+                            next_state.value,
+                            event_source,
+                        )
+                    except ValueError as exc:
+                        logger.warning(
+                            "[STATE_BLOCKED] нормализованный переход %s -> %s запрещён (%s)",
+                            old_state.value,
+                            next_state.value,
+                            exc,
+                        )
+
+        if event.get("step_applied") or event.get("state_applied"):
+            return event
+        return None
+
+    def _decide_execution_rollback(
+        self,
+        *,
+        current_state: TaskState,
+        parsed: ParsedMarkers,
+        event_source: str,
+        last_user_message: str,
+        user_plan_change: bool,
+        critical_violation: bool,
+    ) -> RollbackDecision:
+        if current_state != TaskState.EXECUTION:
+            return RollbackDecision(should_rollback=False, reason=RollbackReason.NOT_ALLOWED)
+
+        target_state = self._parse_task_state(parsed.next_state)
+        if target_state == TaskState.PLANNING and event_source == "raw":
+            return self._validate_rollback_marker(
+                marker_next_state=target_state,
+                last_user_message=last_user_message,
+                current_state=current_state,
+            )
+
+        if user_plan_change:
+            reason = RollbackReason.USER_PLAN_CHANGE
+            return RollbackDecision(should_rollback=RollbackPolicy.is_allowed(reason), reason=reason)
+
+        if critical_violation:
+            reason = RollbackReason.CRITICAL_INVARIANT
+            return RollbackDecision(should_rollback=RollbackPolicy.is_allowed(reason), reason=reason)
+
+        return RollbackDecision(should_rollback=False, reason=RollbackReason.NOT_ALLOWED)
+
+    def _validate_rollback_marker(
+        self,
+        *,
+        marker_next_state: TaskState,
+        last_user_message: str,
+        current_state: TaskState,
+    ) -> RollbackDecision:
+        if marker_next_state != TaskState.PLANNING:
+            return RollbackDecision(should_rollback=False, reason=RollbackReason.NOT_ALLOWED)
+
+        if current_state != TaskState.EXECUTION:
+            reason = RollbackReason.EXPLICIT_MARKER
+            return RollbackDecision(should_rollback=RollbackPolicy.is_allowed(reason), reason=reason)
+
+        normalized_message = str(last_user_message or "").strip()
+        if not normalized_message:
+            reason = RollbackReason.EXPLICIT_MARKER
+            return RollbackDecision(should_rollback=RollbackPolicy.is_allowed(reason), reason=reason)
+
+        llm_client = getattr(self, "llm_client", None)
+        if llm_client is None:
+            logger.info(
+                "[ROLLBACK_SUPPRESSED] explicit_marker отклонён: llm unavailable (msg=%r)",
+                normalized_message,
+            )
+            return RollbackDecision(should_rollback=False, reason=RollbackReason.NOT_ALLOWED)
+
+        prompt = (
+            f'Пользователь написал: "{normalized_message}"\n\n'
+            "Пользователь просит пересмотреть весь план работы?\n"
+            "Ответь ТОЛЬКО: YES или NO.\n"
+            "YES — только если пользователь явно хочет изменить план целиком или начать заново.\n"
+            "NO  — если пользователь отказывается от предложенной опции, уточняет деталь,\n"
+            '      говорит "нет" на вопрос агента, или просто соглашается продолжить без изменений.'
+        )
+
+        try:
+            rollback_model = str(
+                getattr(self.memory, "intent_model", getattr(self, "model", self.DEFAULT_MODEL))
+                or getattr(self, "model", self.DEFAULT_MODEL)
+            )
+            response = llm_client.chat_completion(
+                model=rollback_model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=5,
+                temperature=0,
+            )
+            raw = str(response.choices[0].message.content or "").strip()
+            if self._parse_yes_no(raw) == "YES":
+                reason = RollbackReason.EXPLICIT_MARKER
+                return RollbackDecision(should_rollback=RollbackPolicy.is_allowed(reason), reason=reason)
+            logger.info(
+                "[ROLLBACK_SUPPRESSED] explicit_marker отклонён: пользователь не менял план (msg=%r)",
+                normalized_message,
+            )
+            return RollbackDecision(should_rollback=False, reason=RollbackReason.NOT_ALLOWED)
+        except Exception as exc:
+            logger.warning(
+                "[ROLLBACK_SUPPRESSED] explicit_marker check failed (%s), rollback skipped (msg=%r)",
+                exc,
+                normalized_message,
+            )
+            return RollbackDecision(should_rollback=False, reason=RollbackReason.NOT_ALLOWED)
+
+    @staticmethod
+    def _parse_yes_no(raw: str) -> str:
+        normalized = str(raw or "").strip().upper().strip("`\"' .,!?:;")
+        if normalized in {"YES", "NO"}:
+            return normalized
+        match = re.search(r"\b(YES|NO)\b", normalized)
+        return str(match.group(1) if match else "")
+
+    def _run_execution_guard(
+        self,
+        *,
+        session_id: str,
+        response_signals: ResponseSignals | None = None,
+    ) -> dict[str, Any] | None:
+        ctx = self.memory.working.load(session_id)
+        if ctx is None or ctx.state != TaskState.EXECUTION:
+            return None
+
+        total_steps = len(ctx.plan)
+        done_steps = len(ctx.done)
+        step_counter_done = bool(total_steps > 0 and done_steps >= total_steps)
+        semantic_done = bool(
+            response_signals
+            and response_signals.has_code_artifact
+            and response_signals.has_done_phrase
+            and not response_signals.has_open_question
+        )
+        if not step_counter_done and not semantic_done:
+            return None
+
+        if step_counter_done:
+            logger.info("[EXECUTION_GUARD] завершено по счётчику: %s/%s", done_steps, total_steps)
+        if semantic_done:
+            logger.info(
+                "[EXECUTION_GUARD] завершено семантически: has_code=%s has_done=%s open_q=%s",
+                response_signals.has_code_artifact if response_signals else False,
+                response_signals.has_done_phrase if response_signals else False,
+                response_signals.has_open_question if response_signals else False,
+            )
+
+        if semantic_done and total_steps > 0 and done_steps < total_steps:
+            while True:
+                fresh_ctx = self.memory.working.load(session_id)
+                if fresh_ctx is None or fresh_ctx.state != TaskState.EXECUTION:
+                    break
+                if len(fresh_ctx.done) >= len(fresh_ctx.plan):
+                    break
+                try:
+                    self.memory.working.complete_current_step(session_id=session_id)
+                    updated_ctx = self.memory.working.load(session_id)
+                    updated_done = len(updated_ctx.done) if updated_ctx else len(fresh_ctx.done) + 1
+                    logger.info("[STEP_WRITTEN] current_step=%s сохранён в working layer", updated_done)
+                except ValueError as exc:
+                    logger.warning("[EXECUTION_GUARD] semantic completion sync failed: %s", exc)
+                    break
+
+        synced_ctx = self.memory.working.load(session_id)
+        synced_done = len(synced_ctx.done) if synced_ctx else done_steps
+        synced_total = len(synced_ctx.plan) if synced_ctx else total_steps
+        if synced_total <= 0 or synced_done < synced_total:
+            return None
+
+        try:
+            self.memory.working.request_validation(session_id=session_id)
+            logger.info("[STATE_UPDATE] EXECUTION -> VALIDATION applied by execution_guard")
+            return {
+                "source": "execution_guard",
+                "state_applied": True,
+                "state_from": TaskState.EXECUTION.value,
+                "state_to": TaskState.VALIDATION.value,
+                "semantic_done": semantic_done,
+            }
+        except ValueError as exc:
+            logger.warning("[EXECUTION_GUARD] transition blocked: %s", exc)
+            return {
+                "source": "execution_guard",
+                "state_applied": False,
+                "reason": str(exc),
+                "semantic_done": semantic_done,
+            }
+
+    def _recover_invariant_fail_from_planning(
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        user_message: str,
+    ) -> dict[str, Any] | None:
+        ctx = self.memory.working.load(session_id)
+        if ctx is None or ctx.state != TaskState.PLANNING:
+            return None
+        if not ctx.plan:
+            return None
+
+        if ctx.current_step != ctx.plan[0]:
+            ctx.current_step = ctx.plan[0]
+
+        try:
+            self.memory.working.transition_state(ctx, TaskState.EXECUTION)
+            ctx.updated_at = datetime.utcnow().isoformat()
+            self.memory.working.save(ctx)
+            logger.info("[INVARIANT_RECOVERY] PLANNING -> EXECUTION after invariant_fail")
+        except ValueError as exc:
+            logger.warning("[INVARIANT_RECOVERY] transition blocked: %s", exc)
+            return None
+
+        messages, prompt_preview, read_meta = self.memory.build_messages(
+            session_id=session_id,
+            user_id=user_id,
+            system_instructions=SYSTEM_PROMPT,
+            data_context="",
+            user_query=user_message,
+        )
+        self.last_prompt_preview = prompt_preview
+
+        response = self._create_chat_completion(
+            model=self.model,
+            messages=messages,
+            max_tokens=4096,
+            temperature=0.7,
+        )
+        finish_reason = str(getattr(response.choices[0], "finish_reason", "") or "stop")
+        raw_reply = response.choices[0].message.content or ""
+        parsed = parse_response_markers(raw_reply)
+        usage = getattr(response, "usage", None)
+        prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+        completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+
+        candidate_text = self._sanitize_reply_text(parsed.external)
+        if not candidate_text:
+            candidate_text = "Не удалось сформировать ответ. Уточните задачу или добавьте контекст."
+        elif finish_reason == "length":
+            candidate_text = candidate_text.rstrip() + "\n\n_Ответ обрезан по длине. Можно попросить продолжить._"
+
+        assistant_message, protocol_meta = self._finalize_external_message(
+            session_id=session_id,
+            user_id=user_id,
+            text=candidate_text,
+            internal_trace=parsed.internal,
+            raw_response=raw_reply,
+            source="llm",
+            last_user_message=user_message,
+        )
+        invariant_report = protocol_meta.get("invariant_report") or {}
+        if invariant_report.get("overall_status") != "ok":
+            finish_reason = "invariant_fail"
+            assistant_message = self._build_invariant_failure_user_message(invariant_report)
+
+        return {
+            "assistant_message": assistant_message,
+            "protocol_meta": protocol_meta,
+            "finish_reason": finish_reason,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "read_meta": read_meta,
+        }
+
+    @staticmethod
+    def _build_invariant_retry_prompt(report: dict[str, Any]) -> str:
+        explanation = str(report.get("explanation") or "Нарушены инварианты.").strip()
+        return (
+            "Исправь предыдущий ответ и верни его в корректном формате:\n"
+            "- обязательно <internal> и <external>\n"
+            "- в <internal> включи маркеры [STEP_DONE: N], [NEXT_STATE: X], "
+            "[VALIDATION_OK] или [VALIDATION_FAIL: причина]\n"
+            "- не выводи маркеры в <external>\n"
+            f"Причина исправления: {explanation}"
+        )
+
+    @staticmethod
+    def _build_invariant_failure_user_message(report: dict[str, Any]) -> str:
+        explanation = str(report.get("explanation") or "").strip()
+        if not explanation:
+            explanation = "Нарушены внутренние инварианты ответа."
+        return (
+            "Не удалось безопасно сформировать ответ в текущем виде.\n"
+            f"Причина: {explanation}\n"
+            "Сформулируйте запрос ещё раз, и я продолжу с корректным протоколом."
+        )
 
     def _append_history(self, *, user_message: str, assistant_message: str) -> None:
         if self.ctx.active == "branching" and hasattr(self.ctx.strategy, "add_message"):
@@ -976,6 +1718,8 @@ class IOSAgent:
             logger.warning("[HARD_CONSTRAINTS] profile read skipped: %s", exc)
             return []
         payload = profile.get("hard_constraints") if isinstance(profile, dict) else {}
+        if not isinstance(payload, dict) or not bool(payload.get("verified", False)):
+            return []
         value = payload.get("value") if isinstance(payload, dict) else []
         if not isinstance(value, list):
             return []
@@ -1025,7 +1769,7 @@ class IOSAgent:
                 return "в ответе присутствует рекламная модель, а она запрещена."
 
         if "mvvm" in rule:
-            alt_arches = ["mvc", "viper", "mvp", "clean architecture"]
+            alt_arches = ["mvc", "viper", "clean architecture"]
             if any(token in lower for token in alt_arches) and "mvvm" not in lower:
                 return "в ответе предлагается архитектура, отличная от MVVM."
 
@@ -1057,8 +1801,45 @@ class IOSAgent:
             return "решение, совместимое с указанной версией iOS."
         return "совместимый вариант, который соблюдает заданные ограничения."
 
+    @staticmethod
+    def _is_memory_recall_request(message: str) -> bool:
+        lower = str(message or "").strip().lower()
+        if not lower:
+            return False
+        markers = [
+            "что я у тебя спрашивал",
+            "что я спрашивал",
+            "о чем мы говорили",
+            "о чём мы говорили",
+            "напомни что я спрашивал",
+            "какие вопросы я задавал",
+            "что ты помнишь о нашем диалоге",
+            "что ты помнишь из диалога",
+            "перескажи диалог",
+            "резюме диалога",
+        ]
+        return any(marker in lower for marker in markers)
+
+    def _build_memory_recall_response(self) -> str:
+        user_turns = [
+            str(msg.get("content") or "").strip()
+            for msg in self.conversation_history
+            if str(msg.get("role") or "") == "user" and str(msg.get("content") or "").strip()
+        ]
+        if not user_turns:
+            return "В этой сессии у меня пока нет сохранённых прошлых вопросов."
+        recent = user_turns[-6:]
+        lines = [f"{idx}. {text}" for idx, text in enumerate(recent, start=1)]
+        prefix = "Вот что вы спрашивали в этой сессии:"
+        if len(user_turns) > len(recent):
+            prefix += " Показываю последние 6 вопросов."
+        return prefix + "\n" + "\n".join(lines)
+
     def _estimate_cost(self, prompt_tokens: int, completion_tokens: int) -> float:
-        pricing = self.COST_PER_1M.get(self.model)
+        return self._estimate_cost_for_model(self.model, prompt_tokens, completion_tokens)
+
+    def _estimate_cost_for_model(self, model_name: str, prompt_tokens: int, completion_tokens: int) -> float:
+        pricing = self.COST_PER_1M.get(str(model_name or "").strip()) or self.COST_PER_1M.get(self.model)
         if not pricing:
             return 0.0
         in_cost = (float(prompt_tokens or 0) / 1_000_000.0) * float(pricing["input"])

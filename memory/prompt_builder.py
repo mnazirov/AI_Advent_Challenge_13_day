@@ -61,21 +61,15 @@ class PromptBuilder:
             skipped_fields,
         )
 
-        sections: list[str] = []
+        profile_sections: list[str] = [profile_overrides_block]
         if hard_constraints_block:
-            sections.append(hard_constraints_block)
-        sections.extend(
-            [
-                profile_overrides_block,
-                self._build_base_behavior_block(system_instructions),
-            ]
-        )
+            profile_sections.insert(0, hard_constraints_block)
         if user_role_block:
-            sections.append(user_role_block)
-        sections.append(MEMORY_TRUST_POLICY)
+            profile_sections.append(user_role_block)
+        profile_sections.append(MEMORY_TRUST_POLICY)
 
         if data_context.strip():
-            sections.append("[DATA_CONTEXT]\n" + data_context.strip())
+            profile_sections.append("[DATA_CONTEXT]\n" + data_context.strip())
 
         decisions = long_term.get("decisions") or []
         decision_lines: list[str] = []
@@ -86,7 +80,7 @@ class PromptBuilder:
                     continue
                 decision_lines.append(f"- [{d.get('id')}] {text}")
         if decision_lines:
-            sections.append("[LONG_TERM_DECISIONS]\n" + "\n".join(decision_lines))
+            profile_sections.append("[LONG_TERM_DECISIONS]\n" + "\n".join(decision_lines))
 
         notes = long_term.get("notes") or []
         note_lines: list[str] = []
@@ -97,23 +91,18 @@ class PromptBuilder:
                     continue
                 note_lines.append(f"- [{n.get('id')}] {text}")
         if note_lines:
-            sections.append("[LONG_TERM_NOTES]\n" + "\n".join(note_lines))
+            profile_sections.append("[LONG_TERM_NOTES]\n" + "\n".join(note_lines))
 
-        if working:
-            sections.append(
-                "[WORKING_TASK]\n"
-                f"task_id={working.task_id}\n"
-                f"goal={working.goal}\n"
-                f"state={working.state.value}\n"
-                f"plan={working.plan}\n"
-                f"current_step={working.current_step}\n"
-                f"done_steps={working.done_steps}\n"
-                f"open_questions={working.open_questions}\n"
-                f"artifacts={working.artifacts}\n"
-                f"vars={working.vars}"
-            )
+        system_sections = [
+            "[PROFILE]\n" + "\n\n".join(section for section in profile_sections if section),
+            "[ROLE]\n" + self._build_base_behavior_block(system_instructions),
+            self._build_state_block(working),
+            self._build_invariants_block(),
+            self._build_rules_block(),
+            "[USER QUERY]\n" + str(user_query or "").strip(),
+        ]
 
-        system_content = "\n\n".join(s for s in sections if s)
+        system_content = "\n\n".join(s for s in system_sections if s)
         messages: list[dict[str, str]] = [{"role": "system", "content": system_content}]
         if short_term_messages:
             messages.extend(short_term_messages)
@@ -134,6 +123,75 @@ class PromptBuilder:
             "section_profile": profile_preview or "[PROFILE] none",
         }
         return messages, preview
+
+    def _build_state_block(self, working: TaskContext | None) -> str:
+        if not working:
+            return (
+                "[STATE]\n"
+                "task=\n"
+                "state=PLANNING\n"
+                "plan=[]\n"
+                "current_step=\n"
+                "done=[]\n"
+                "artifacts=[]\n"
+                "open_questions=[]"
+            )
+        return (
+            "[STATE]\n"
+            f"task={working.task}\n"
+            f"state={working.state.value}\n"
+            f"plan={working.plan}\n"
+            f"current_step={working.current_step}\n"
+            f"done={working.done}\n"
+            f"artifacts={working.artifacts}\n"
+            f"open_questions={working.open_questions}"
+        )
+
+    @staticmethod
+    def _build_invariants_block() -> str:
+        return (
+            "[INVARIANTS]\n"
+            "1) Follow the current STATE object and never invent state transitions.\n"
+            "2) Work strictly within current_step.\n"
+            "3) Do not leak internal markers into user-facing text.\n"
+            "4) Every response must include protocol markers in <internal>."
+        )
+
+    @staticmethod
+    def _build_rules_block() -> str:
+        return (
+            "[RULES]\n"
+            "- Work strictly within current_step.\n"
+            "- Do not move to the next stage without explicit user confirmation when required.\n"
+            "- If user asks to skip mandatory step, refuse and explain.\n"
+            "- In EXECUTION, use [NEXT_STATE: PLANNING] ONLY if user explicitly asks to revise the whole plan or restart approach.\n"
+            "- If user declines an optional suggestion (e.g. 'нет', 'не нужно', 'оставь как есть'), this is NOT a plan change.\n"
+            "  Continue EXECUTION with [NEXT_STATE: EXECUTION] or [NEXT_STATE: VALIDATION] when all steps are complete.\n"
+            "- If one response completes multiple plan steps, set [STEP_DONE: N] to the LAST completed step number.\n"
+            "- Output format must be:\n"
+            "  <internal>...</internal>\n"
+            "  <external>...</external>\n"
+            "- Include protocol markers inside <internal> for every turn.\n"
+            "- Use marker formats only from the section below.\n\n"
+            "В PLANNING формируй краткий согласованный план шагов для текущей задачи.\n"
+            "Переход в EXECUTION допустим только после явного подтверждения плана пользователем.\n\n"
+            "КРИТИЧНО — ДОПУСТИМЫЕ МАРКЕРЫ:\n"
+            "Ты можешь использовать ТОЛЬКО эти маркеры и ТОЛЬКО в точном формате:\n\n"
+            "  [NEXT_STATE: PLANNING]\n"
+            "  [NEXT_STATE: EXECUTION]\n"
+            "  [NEXT_STATE: VALIDATION]\n"
+            "  [NEXT_STATE: DONE]\n"
+            "  [STEP_DONE: N]         — где N это число\n"
+            "  [VALIDATION_OK]\n"
+            "  [VALIDATION_FAIL: причина]\n\n"
+            "  [DONE: описание]       — финальный артефакт готов (используй на последнем шаге)\n"
+            "  [OPEN_QUESTION: текст] — если задаёшь вопрос пользователю в рамках шага\n"
+            "  [CODE_ARTIFACT]        — если в ответе есть кодовый артефакт\n\n"
+            "ЗАПРЕЩЕНО создавать любые другие маркеры.\n"
+            "ЗАПРЕЩЕНО: [NEXT_STATE: COLLECT_REQUIREMENTS] или любой кастомный лейбл.\n"
+            "Внутренние под-шаги PLANNING — не являются состояниями.\n"
+            "Не оборачивай их в [NEXT_STATE: ...]."
+        )
 
     def _build_base_behavior_block(self, base_instructions: str) -> str:
         base = str(base_instructions or "").strip() or "none"

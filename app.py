@@ -38,13 +38,25 @@ agent = IOSAgent()
 logger.info("[INIT] IOSAgent инициализирован")
 _runtime_session_id: str | None = None
 
-
 def _pretty_json(payload: dict) -> str:
     """Форматирует JSON для читаемых логов."""
     try:
         return json.dumps(payload, ensure_ascii=False, indent=2, default=str)
     except Exception:
         return str(payload)
+
+
+def _compact_text_for_log(text: str, max_chars: int = 600) -> dict:
+    """Подготавливает текст для логов: ограничивает длину и добавляет флаг обрезки."""
+    value = str(text or "")
+    normalized = re.sub(r"\s+", " ", value).strip()
+    truncated = len(normalized) > max_chars
+    preview = normalized[:max_chars] + ("…" if truncated else "")
+    return {
+        "preview": preview,
+        "truncated": truncated,
+        "chars": len(normalized),
+    }
 
 
 def _client_ip() -> str:
@@ -228,6 +240,58 @@ def _load_agent_runtime_session(session_id: str, user_id: str) -> dict | None:
 
     _runtime_session_id = session_id
     return data
+
+
+def _resolve_debug_memory_request(data: dict | None = None) -> tuple[str, str, str, int]:
+    """Нормализует общие параметры debug memory запросов."""
+    payload = data or {}
+    user_id = _resolve_request_user_id(payload)
+    requested_session_id = str(payload.get("session_id") or request.args.get("session_id") or "").strip()
+    session_id = _get_or_create_session(user_id=user_id, requested_session_id=requested_session_id)
+    query = str(payload.get("q") or request.args.get("q") or "").strip()
+    try:
+        top_k = int(payload.get("top_k", request.args.get("top_k", 3)))
+    except (TypeError, ValueError):
+        top_k = 3
+    top_k = max(1, min(10, top_k))
+    return user_id, session_id, query, top_k
+
+
+def _build_debug_memory_snapshot(*, session_id: str, user_id: str, query: str, top_k: int) -> dict:
+    snapshot = agent.memory.debug_snapshot(session_id=session_id, user_id=user_id, query=query, top_k=top_k)
+    snapshot["resolved_session_id"] = session_id
+    return snapshot
+
+
+def _debug_memory_clear_response(route: str, *, session_id: str, user_id: str, query: str, top_k: int, cleared: bool) -> Response:
+    snapshot = _build_debug_memory_snapshot(session_id=session_id, user_id=user_id, query=query, top_k=top_k)
+    payload = {"success": True, "cleared": bool(cleared), "snapshot": snapshot}
+    _log_http_response(
+        route,
+        200,
+        {
+            "success": True,
+            "cleared": bool(cleared),
+            "resolved_session_id": session_id,
+            "short_term_turns": snapshot.get("short_term", {}).get("turns_count", 0),
+            "working_present": snapshot.get("working", {}).get("present", False),
+            "long_term_decisions": len(snapshot.get("long_term", {}).get("decisions_top_k") or []),
+            "long_term_notes": len(snapshot.get("long_term", {}).get("notes_top_k") or []),
+            "memory_writes": len(snapshot.get("memory_writes") or []),
+        },
+    )
+    return jsonify(payload)
+
+
+def _clear_runtime_conversation_context(*, session_id: str, user_id: str) -> None:
+    """Сбрасывает runtime-историю и ctx для активной session_id без затрагивания working/long-term."""
+    global _runtime_session_id
+    if _runtime_session_id != session_id:
+        return
+    agent.conversation_history = []
+    agent.ctx.reset_all()
+    agent.restore_memory_session(session_id=session_id, messages=[])
+    agent.last_memory_stats = agent.memory.stats(session_id=session_id, user_id=user_id)
 
 
 @app.route("/")
@@ -414,10 +478,14 @@ def delete_project_endpoint(project_id: str):
 def chat():
     """Принимает сообщение пользователя и возвращает ответ агента."""
     data = request.get_json(silent=True) or {}
-    message = data.get("message", "").strip()
+    message = str(data.get("message", "")).strip()
+    client_intent = data.get("client_intent")
+    if not isinstance(client_intent, dict):
+        client_intent = None
     requested_model = str(data.get("model", "")).strip()
     requested_session_id = str(data.get("session_id") or "").strip()
     user_id = _resolve_request_user_id(data)
+
     active_project = _ensure_active_project(user_id)
 
     if not active_project:
@@ -448,6 +516,7 @@ def chat():
         "/chat",
         {
             "message": message,
+            "client_intent": client_intent or None,
             "session_id": session_id,
             "user_id": user_id,
             "project_id": active_project.get("id"),
@@ -462,7 +531,12 @@ def chat():
 
     try:
         _load_agent_runtime_session(session_id=session_id, user_id=user_id)
-        reply = agent.chat(message, session_id=session_id, user_id=user_id)
+        reply = agent.chat(
+            message,
+            session_id=session_id,
+            user_id=user_id,
+            client_intent=client_intent,
+        )
         user_content, assistant_content = _extract_last_turn_for_storage(message, reply)
         save_message(session_id, "user", user_content)
         token_stats = agent.last_token_stats or {}
@@ -478,9 +552,9 @@ def chat():
         save_ctx_state(session_id, agent.ctx.dump())
 
         ctx_state = _build_ctx_state()
-        working_view = agent.memory.get_working_view(session_id=session_id)
         working_actions = agent.memory.get_working_actions(session_id=session_id)
         response_meta = agent.last_chat_response_meta or {}
+        working_view = response_meta.get("working_view") or agent.memory.get_working_view(session_id=session_id)
         finish_reason = response_meta.get("finish_reason")
         if finish_reason is None and isinstance(token_stats, dict):
             finish_reason = token_stats.get("finish_reason")
@@ -495,13 +569,9 @@ def chat():
             "ctx_strategy": ctx_state["strategy"],
             "working_view": working_view,
             "working_actions": response_meta.get("working_actions") or working_actions,
-            "protocol_state": response_meta.get("protocol_state"),
             "invariant_report": response_meta.get("invariant_report"),
-            "next_step": response_meta.get("next_step"),
             "internal": {
-                "protocol_state": response_meta.get("protocol_state"),
                 "invariant_report": response_meta.get("invariant_report"),
-                "next_step": response_meta.get("next_step"),
                 "internal_trace": response_meta.get("internal_trace"),
             },
             "finish_reason": finish_reason,
@@ -513,6 +583,7 @@ def chat():
             {
                 "session_id": session_id,
                 "reply_len": len(reply),
+                "reply_preview": _compact_text_for_log(reply),
                 "token_stats": token_stats,
                 "memory_stats": agent.last_memory_stats or {},
             },
@@ -609,124 +680,6 @@ def debug_get_memory_profile():
         logger.exception("[DEBUG] memory profile get failed: %s", exc)
         _log_http_response("/debug/memory/profile", 500, {"error": str(exc)})
         return jsonify({"success": False, "error": str(exc)}), 500
-
-
-@app.route("/debug/protocol/status", methods=["GET"])
-def debug_protocol_status():
-    """Возвращает состояние protocol v2: профиль, header, инварианты и next_step."""
-    user_id = _get_or_create_user_id()
-    session_id = _get_or_create_session(user_id=user_id)
-    _log_http_request(
-        "/debug/protocol/status",
-        {"session_id": session_id[:8] + "…", "user_id": user_id[:12] + "…"},
-    )
-    try:
-        profile_state = agent.memory.ensure_protocol_profile(user_id=user_id)
-        invariant_report = agent.memory.evaluate_invariants(run_external=False)
-        header_payload = agent.memory.build_protocol_header(
-            session_id=session_id,
-            user_id=user_id,
-            invariant_report=invariant_report,
-        )
-        payload = {
-            "success": True,
-            "protocol": profile_state,
-            "protocol_header": header_payload.get("header"),
-            "protocol_state": header_payload.get("protocol_state"),
-            "invariant_report": invariant_report,
-            "next_step": header_payload.get("next_step"),
-            "working_view": agent.memory.get_working_view(session_id=session_id),
-        }
-        _log_http_response(
-            "/debug/protocol/status",
-            200,
-            {
-                "success": True,
-                "phase": (header_payload.get("protocol_state") or {}).get("phase"),
-                "inv": invariant_report.get("overall_status"),
-            },
-        )
-        return jsonify(payload)
-    except Exception as exc:
-        logger.exception("[DEBUG] protocol status failed: %s", exc)
-        _log_http_response("/debug/protocol/status", 500, {"error": str(exc)})
-        return jsonify({"success": False, "error": str(exc)}), 500
-
-
-@app.route("/debug/protocol/profile/confirm-update", methods=["POST"])
-def debug_protocol_confirm_profile_update():
-    """Подтверждает или отклоняет pending PROFILE UPDATE."""
-    data = request.get_json(silent=True) or {}
-    user_id = _resolve_request_user_id(data)
-    session_id = _get_or_create_session(user_id=user_id)
-    accept_raw = data.get("accept", True)
-    if isinstance(accept_raw, str):
-        accept = accept_raw.strip().lower() in {"1", "true", "yes", "y", "да"}
-    else:
-        accept = bool(accept_raw)
-    _log_http_request(
-        "/debug/protocol/profile/confirm-update",
-        {"session_id": session_id[:8] + "…", "user_id": user_id[:12] + "…", "accept": accept},
-    )
-    try:
-        result = agent.memory.confirm_profile_update(user_id=user_id, accept=accept)
-        snapshot = agent.memory.get_protocol_status(user_id=user_id)
-        payload = {
-            "success": True,
-            "result": result,
-            "protocol": snapshot,
-        }
-        _log_http_response(
-            "/debug/protocol/profile/confirm-update",
-            200,
-            {"success": True, "status": result.get("status")},
-        )
-        return jsonify(payload)
-    except Exception as exc:
-        logger.exception("[DEBUG] protocol profile confirm failed: %s", exc)
-        _log_http_response("/debug/protocol/profile/confirm-update", 500, {"error": str(exc)})
-        return jsonify({"success": False, "error": str(exc)}), 500
-
-
-@app.route("/debug/protocol/validate-type2", methods=["POST"])
-def debug_protocol_validate_type2():
-    """Запускает внешнюю проверку TYPE-2 инвариантов."""
-    data = request.get_json(silent=True) or {}
-    run_external_raw = data.get("run_external", True)
-    if isinstance(run_external_raw, str):
-        run_external = run_external_raw.strip().lower() in {"1", "true", "yes", "y", "да"}
-    else:
-        run_external = bool(run_external_raw)
-    user_id = _resolve_request_user_id(data)
-    session_id = _get_or_create_session(user_id=user_id)
-    _log_http_request(
-        "/debug/protocol/validate-type2",
-        {"session_id": session_id[:8] + "…", "user_id": user_id[:12] + "…", "run_external": run_external},
-    )
-    try:
-        invariant_report = agent.memory.evaluate_invariants(run_external=run_external)
-        header_payload = agent.memory.build_protocol_header(
-            session_id=session_id,
-            user_id=user_id,
-            invariant_report=invariant_report,
-        )
-        payload = {
-            "success": True,
-            "invariant_report": invariant_report,
-            "protocol_header": header_payload.get("header"),
-            "next_step": header_payload.get("next_step"),
-        }
-        _log_http_response(
-            "/debug/protocol/validate-type2",
-            200,
-            {"success": True, "inv_status": invariant_report.get("overall_status")},
-        )
-        return jsonify(payload)
-    except Exception as exc:
-        logger.exception("[DEBUG] protocol type2 validation failed: %s", exc)
-        _log_http_response("/debug/protocol/validate-type2", 500, {"error": str(exc)})
-        return jsonify({"success": False, "error": str(exc)}), 500
-
 
 @app.route("/debug/memory/profile/field", methods=["PATCH"])
 def debug_patch_memory_profile_field():
@@ -912,57 +865,89 @@ def debug_resolve_memory_profile_conflict():
         return jsonify({"success": False, "error": str(exc)}), 400
 
 
+@app.route("/debug/memory/short-term/clear", methods=["POST"])
+def debug_clear_short_term_memory():
+    """Очищает short-term и историю сообщений текущей сессии для полного forget-контекста."""
+    data = request.get_json(silent=True) or {}
+    user_id, session_id, query, top_k = _resolve_debug_memory_request(data)
+    _log_http_request(
+        "/debug/memory/short-term/clear",
+        {"session_id": session_id[:8] + "…", "user_id": user_id[:12] + "…", "top_k": top_k},
+    )
+    try:
+        cleared = agent.memory.clear_short_term_layer(session_id=session_id)
+        _clear_runtime_conversation_context(session_id=session_id, user_id=user_id)
+        return _debug_memory_clear_response(
+            "/debug/memory/short-term/clear",
+            session_id=session_id,
+            user_id=user_id,
+            query=query,
+            top_k=top_k,
+            cleared=cleared,
+        )
+    except Exception as exc:
+        logger.exception("[DEBUG] memory short-term clear failed: %s", exc)
+        _log_http_response("/debug/memory/short-term/clear", 500, {"error": str(exc)})
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
 @app.route("/debug/memory/working/clear", methods=["POST"])
 def debug_clear_working_memory():
     """Очищает только рабочую память текущей сессии."""
-    user_id = _get_or_create_user_id()
-    session_id = _get_or_create_session(user_id=user_id)
     data = request.get_json(silent=True) or {}
-    query = str(data.get("q") or "").strip()
-    try:
-        top_k = int(data.get("top_k", 3))
-    except (TypeError, ValueError):
-        top_k = 3
-    top_k = max(1, min(10, top_k))
+    user_id, session_id, query, top_k = _resolve_debug_memory_request(data)
     _log_http_request(
         "/debug/memory/working/clear",
         {"session_id": session_id[:8] + "…", "user_id": user_id[:12] + "…", "top_k": top_k},
     )
     try:
         cleared = agent.memory.clear_working_layer(session_id=session_id)
-        snapshot = agent.memory.debug_snapshot(session_id=session_id, user_id=user_id, query=query, top_k=top_k)
-        payload = {"success": True, "cleared": bool(cleared), "snapshot": snapshot}
-        _log_http_response(
+        return _debug_memory_clear_response(
             "/debug/memory/working/clear",
-            200,
-            {
-                "success": True,
-                "cleared": bool(cleared),
-                "working_present": snapshot.get("working", {}).get("present", False),
-                "memory_writes": len(snapshot.get("memory_writes") or []),
-            },
+            session_id=session_id,
+            user_id=user_id,
+            query=query,
+            top_k=top_k,
+            cleared=cleared,
         )
-        return jsonify(payload)
     except Exception as exc:
         logger.exception("[DEBUG] memory working clear failed: %s", exc)
         _log_http_response("/debug/memory/working/clear", 500, {"error": str(exc)})
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
+@app.route("/debug/memory/long-term/clear", methods=["POST"])
+def debug_clear_long_term_memory():
+    """Очищает весь long-term слой пользователя."""
+    data = request.get_json(silent=True) or {}
+    user_id, session_id, query, top_k = _resolve_debug_memory_request(data)
+    _log_http_request(
+        "/debug/memory/long-term/clear",
+        {"session_id": session_id[:8] + "…", "user_id": user_id[:12] + "…", "top_k": top_k},
+    )
+    try:
+        cleared = agent.memory.clear_long_term_layer(session_id=session_id, user_id=user_id)
+        return _debug_memory_clear_response(
+            "/debug/memory/long-term/clear",
+            session_id=session_id,
+            user_id=user_id,
+            query=query,
+            top_k=top_k,
+            cleared=cleared,
+        )
+    except Exception as exc:
+        logger.exception("[DEBUG] memory long-term clear failed: %s", exc)
+        _log_http_response("/debug/memory/long-term/clear", 500, {"error": str(exc)})
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
 @app.route("/debug/memory/long-term/delete", methods=["POST"])
 def debug_delete_longterm_entry():
     """Удаляет конкретную запись из long-term памяти (decision/note)."""
-    user_id = _get_or_create_user_id()
-    session_id = _get_or_create_session(user_id=user_id)
     data = request.get_json(silent=True) or {}
+    user_id, session_id, query, top_k = _resolve_debug_memory_request(data)
     entry_type = str(data.get("entry_type") or "").strip().lower()
     entry_id_raw = data.get("id")
-    query = str(data.get("q") or "").strip()
-    try:
-        top_k = int(data.get("top_k", 3))
-    except (TypeError, ValueError):
-        top_k = 3
-    top_k = max(1, min(10, top_k))
     _log_http_request(
         "/debug/memory/long-term/delete",
         {

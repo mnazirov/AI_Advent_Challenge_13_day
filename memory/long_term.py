@@ -292,6 +292,19 @@ class LongTermMemory:
     def delete_note(self, *, user_id: str, note_id: int) -> bool:
         return storage.memory_delete_longterm_note(user_id=user_id, note_id=int(note_id)) > 0
 
+    def clear_user_memory(self, *, user_id: str) -> dict[str, int]:
+        """Полностью очищает long-term память пользователя."""
+        profile_deleted = storage.memory_delete_longterm_profile(user_id=user_id)
+        decisions_deleted = storage.memory_delete_all_longterm_decisions(user_id=user_id)
+        notes_deleted = storage.memory_delete_all_longterm_notes(user_id=user_id)
+        pending_deleted = storage.memory_delete_all_longterm_pending(user_id=user_id)
+        return {
+            "profile": int(profile_deleted),
+            "decisions": int(decisions_deleted),
+            "notes": int(notes_deleted),
+            "pending": int(pending_deleted),
+        }
+
     def propose_assistant_entry(
         self,
         *,

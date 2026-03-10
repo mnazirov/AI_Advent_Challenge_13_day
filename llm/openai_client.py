@@ -12,7 +12,6 @@ class OpenAILLMClient:
     """OpenAI-backed LLM client with model-compatibility fallbacks."""
 
     MODEL_COMPAT_PRESETS = {
-        "gpt-5.3-instant": {"token_param": "max_completion_tokens", "drop_temperature": True},
         "gpt-5-mini": {"token_param": "max_completion_tokens", "drop_temperature": True},
     }
 

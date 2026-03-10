@@ -7,6 +7,14 @@ from uuid import uuid4
 from flask import Flask, Response, jsonify, render_template, request
 
 from agent import IOSAgent
+from mcp_duckduckgo import (
+    call_define,
+    call_related_topics,
+    call_save_bookmark,
+    call_search,
+    call_search_bookmarks,
+    get_ddg_capabilities,
+)
 from mcp_time import call_time_tool, get_time_tools
 from storage import (
     clear_session_messages,
@@ -425,6 +433,112 @@ def route_mcp_time_call():
         },
     )
     return jsonify(payload)
+
+
+@app.route("/mcp/ddg/tools", methods=["GET"])
+def route_mcp_ddg_tools():
+    """GET /mcp/ddg/tools — tools, resources, prompts DuckDuckGo MCP-сервера."""
+    print("[MCP_DDG] GET /mcp/ddg/tools called", flush=True)
+    result = get_ddg_capabilities()
+    print(
+        f"[MCP_DDG] capabilities: success={result.success} "
+        f"tools={[tool.name for tool in result.tools]} error={result.error}",
+        flush=True,
+    )
+
+    if not result.success:
+        logger.error("[MCP_DDG] tools error: %s", result.error)
+        return jsonify({"success": False, "error": result.error}), 500
+
+    logger.info("[MCP_DDG] tools ok: %s", [tool.name for tool in result.tools])
+    return jsonify(
+        {
+            "success": True,
+            "tools": [{"name": tool.name, "description": tool.description} for tool in result.tools],
+            "resources": result.resources,
+            "prompts": result.prompts,
+        }
+    )
+
+
+@app.route("/mcp/ddg/search", methods=["POST"])
+def route_mcp_ddg_search():
+    """
+    POST /mcp/ddg/search
+    Body: {"tool": "search"|"define"|"related_topics",
+           "query": "...", "term": "...", "limit": 5}
+    """
+    body = request.get_json(silent=True) or {}
+    tool = body.get("tool", "search")
+    query = (body.get("query") or "").strip()
+    term = (body.get("term") or query).strip()
+    print(
+        f"[MCP_DDG] POST /mcp/ddg/search tool={tool!r} query={query!r} term={term!r}",
+        flush=True,
+    )
+
+    if not query and not term:
+        return jsonify({"success": False, "error": "Укажите query или term"}), 400
+
+    valid_tools = {"search", "define", "related_topics"}
+    if tool not in valid_tools:
+        return jsonify(
+            {
+                "success": False,
+                "error": f"Неизвестный tool '{tool}'. Доступно: {', '.join(sorted(valid_tools))}",
+            }
+        ), 400
+
+    if tool == "search":
+        result = call_search(query)
+    elif tool == "define":
+        result = call_define(term)
+    else:
+        try:
+            limit = int(body.get("limit", 5))
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "limit должен быть целым числом"}), 400
+        result = call_related_topics(query, limit)
+    print(f"[MCP_DDG] search result: success={result.success} error={result.error}", flush=True)
+
+    if not result.success:
+        return jsonify({"success": False, "error": result.error}), 500
+
+    return jsonify({"success": True, "tool": result.tool, "data": result.data})
+
+
+@app.route("/mcp/ddg/bookmarks", methods=["POST"])
+def route_mcp_ddg_bookmarks():
+    """
+    POST /mcp/ddg/bookmarks
+    Body save:   {"action": "save", "url": "...", "title": "...", "tags": [...]}
+    Body search: {"action": "search", "query": "..."}
+    """
+    body = request.get_json(silent=True) or {}
+    action = body.get("action", "search")
+    print(f"[MCP_DDG] POST /mcp/ddg/bookmarks action={action!r}", flush=True)
+
+    if action == "save":
+        url = (body.get("url") or "").strip()
+        title = (body.get("title") or "").strip()
+        if not url or not title:
+            return jsonify({"success": False, "error": "url и title обязательны для action=save"}), 400
+        result = call_save_bookmark(url, title, body.get("tags"))
+    elif action == "search":
+        result = call_search_bookmarks(body.get("query") or "")
+    else:
+        return jsonify(
+            {
+                "success": False,
+                "error": f"Неизвестный action '{action}'. Доступно: save, search",
+            }
+        ), 400
+    print(f"[MCP_DDG] bookmarks result: success={result.success} error={result.error}", flush=True)
+
+    if not result.success:
+        return jsonify({"success": False, "error": result.error}), 500
+
+    return jsonify({"success": True, "action": action, "data": result.data})
 
 
 @app.route("/model", methods=["POST"])

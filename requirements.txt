@@ -2,5 +2,6 @@ openai
 flask
 pandas
 requests
+httpx
 mcp
 mcp-server-time

@@ -3596,6 +3596,329 @@ textarea::placeholder,
   opacity: 1;
 }
 
+/* ── MCP Bottom Sheet — компактный ────────────────────────────── */
+.mcp-sheet-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 200;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+.mcp-sheet-overlay.open {
+  display: block;
+}
+
+.mcp-sheet {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: #1c1c1e;
+  border-radius: 14px 14px 0 0;
+  z-index: 201;
+  height: auto;
+  max-height: 280px;
+  overflow: hidden;
+  padding: 0 0 env(safe-area-inset-bottom, 16px);
+  transform: translateY(100%);
+  transition: transform 0.26s cubic-bezier(0.32, 0.72, 0, 1);
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.4);
+}
+
+.mcp-sheet.open {
+  transform: translateY(0);
+}
+
+.mcp-sheet-handle {
+  width: 32px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 2px;
+  margin: 10px auto 0;
+}
+
+.mcp-sheet-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #636366;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  padding: 10px 20px 6px;
+}
+
+.mcp-service-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px;
+  cursor: pointer;
+  min-height: 52px;
+}
+
+.mcp-service-row:active {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.mcp-service-row.disabled {
+  opacity: 0.38;
+  cursor: default;
+  pointer-events: none;
+}
+
+.mcp-service-row + .mcp-service-row {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.mcp-service-icon {
+  font-size: 22px;
+  width: 32px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.mcp-service-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.mcp-service-name {
+  font-size: 15px;
+  font-weight: 500;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mcp-service-badge {
+  font-size: 10px;
+  font-weight: 500;
+  color: #636366;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.mcp-service-desc {
+  font-size: 12px;
+  color: #636366;
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Toggle */
+.mcp-toggle {
+  position: relative;
+  width: 51px;
+  height: 31px;
+  flex-shrink: 0;
+}
+
+.mcp-toggle input {
+  display: none;
+}
+
+.mcp-toggle-track {
+  position: absolute;
+  inset: 0;
+  background: #3a3a3c;
+  border-radius: 31px;
+  transition: background 0.2s;
+  cursor: pointer;
+}
+
+.mcp-toggle input:checked + .mcp-toggle-track {
+  background: #30d158;
+}
+
+.mcp-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 27px;
+  height: 27px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  transition: transform 0.2s;
+  pointer-events: none;
+}
+
+.mcp-toggle input:checked ~ .mcp-toggle-thumb {
+  transform: translateX(20px);
+}
+
+/* ── Input area wrapper ────────────────────────────────────────── */
+.input-area-wrapper {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.input-row .input-shell {
+  flex: 1;
+}
+
+/* ── MCP статус-полоска ────────────────────────────────────────── */
+.mcp-input-status {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 16px;
+  background: rgba(48, 209, 88, 0.08);
+  border-bottom: 1px solid rgba(48, 209, 88, 0.15);
+  height: 26px;
+  min-height: 26px;
+  overflow: hidden;
+}
+
+.mcp-input-status.visible {
+  display: flex;
+}
+
+.mcp-input-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #30d158;
+  flex-shrink: 0;
+}
+
+.mcp-input-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: #30d158;
+  flex: 1;
+  white-space: nowrap;
+}
+
+.mcp-input-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #636366;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  transition: color 0.15s;
+  border-radius: 3px;
+}
+
+.mcp-input-close:hover {
+  color: #ebebf5;
+}
+
+/* ── Кнопка "+" ────────────────────────────────────────────────── */
+.mcp-plus-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #0a84ff;
+  font-size: 22px;
+  font-weight: 300;
+  line-height: 1;
+  padding: 4px 6px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  transition: background 0.12s, opacity 0.12s;
+  opacity: 0.85;
+  margin-bottom: 8px;
+}
+
+.mcp-plus-btn:hover {
+  background: rgba(10, 132, 255, 0.12);
+  opacity: 1;
+}
+
+/* ── MCP Result Card ───────────────────────────────────────────── */
+.mcp-result-card {
+  margin: 8px 0 2px;
+  padding: 12px 14px;
+  background: rgba(10, 132, 255, 0.08);
+  border: 1px solid rgba(10, 132, 255, 0.2);
+  border-radius: 12px;
+  font-size: 13px;
+}
+
+.mcp-result-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  color: #0a84ff;
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.mcp-result-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-primary, #fff);
+  margin-bottom: 4px;
+}
+
+.mcp-result-body {
+  color: var(--text-secondary, #ebebf5cc);
+  line-height: 1.5;
+}
+
+.mcp-result-card a {
+  color: #8fd8ff;
+  text-decoration-color: rgba(143, 216, 255, 0.7);
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1.5px;
+}
+
+.mcp-result-card a:visited {
+  color: #b8c9ff;
+  text-decoration-color: rgba(184, 201, 255, 0.65);
+}
+
+.mcp-result-card a:hover {
+  color: #d8f1ff;
+  text-decoration-color: currentColor;
+}
+
+.mcp-result-card a:focus-visible {
+  outline: 1px solid rgba(143, 216, 255, 0.75);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.mcp-result-source {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-secondary, #8e8e93);
+}
+
+.mcp-result-source a {
+  color: #8fd8ff;
+  text-decoration-color: rgba(143, 216, 255, 0.7);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideDown {
+  from { transform: translateY(-8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
 .task-actions-wrap {
   display: none;
   margin-top: 8px;
@@ -4198,7 +4521,6 @@ textarea::placeholder,
         </div>
         <div class="chat-header-right">
           <select class="model-select" id="modelSelect" title="Выбор модели" onchange="onModelChange(this.value)">
-            <option value="gpt-5.3-instant">gpt-5.3-instant</option>
             <option value="gpt-5-mini">gpt-5-mini</option>
           </select>
           <button class="debug-open-btn" id="debugOpenBtn"
@@ -4344,17 +4666,27 @@ textarea::placeholder,
     </div>
 
     <div class="input-area">
-      <div class="input-shell">
-        <textarea
-          id="userInput"
-          placeholder="Опиши фичу или задай вопрос по iOS..."
-          rows="1"
-          onkeydown="handleKey(event)"
-          oninput="autoResize(this)"
-        ></textarea>
-        <button class="send-btn" id="sendBtn" onclick="sendMsg()">
-          <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
-        </button>
+      <div class="input-area-wrapper">
+        <div class="mcp-input-status" id="mcpStatusBar">
+          <span class="mcp-input-dot"></span>
+          <span class="mcp-input-label">Поиск в сети</span>
+          <button class="mcp-input-close" onclick="mcpDisconnect()" title="Отключить поиск">×</button>
+        </div>
+        <div class="input-row">
+          <button class="mcp-plus-btn" onclick="mcpOpenSheet()" title="Сервисы">+</button>
+          <div class="input-shell">
+            <textarea
+              id="userInput"
+              placeholder="Опиши фичу или задай вопрос по iOS..."
+              rows="1"
+              onkeydown="handleKey(event)"
+              oninput="autoResize(this)"
+            ></textarea>
+            <button class="send-btn" id="sendBtn" onclick="sendMsg()">
+              <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+            </button>
+          </div>
+        </div>
       </div>
       <div class="task-actions-wrap" id="taskActionsWrap">
         <div class="task-actions" id="taskStateActions"></div>
@@ -4453,6 +4785,30 @@ textarea::placeholder,
 </main>
 </div>
 
+<!-- MCP Bottom Sheet Overlay -->
+<div class="mcp-sheet-overlay" id="mcpOverlay" onclick="mcpCloseSheet()"></div>
+
+<!-- MCP Bottom Sheet -->
+<div class="mcp-sheet" id="mcpSheet">
+  <div class="mcp-sheet-handle"></div>
+  <div class="mcp-sheet-title">Сервисы</div>
+
+  <!-- Поиск в сети -->
+  <div class="mcp-service-row" onclick="mcpToggleSearch()">
+    <div class="mcp-service-icon">🔍</div>
+    <div class="mcp-service-info">
+      <div class="mcp-service-name">Поиск в сети</div>
+      <div class="mcp-service-desc">DuckDuckGo: поиск, определения, связанные темы</div>
+    </div>
+    <label class="mcp-toggle" onclick="event.stopPropagation()">
+      <input type="checkbox" id="mcpWebSearchToggle" onchange="mcpHandleToggle(this.checked)">
+      <div class="mcp-toggle-track"></div>
+      <div class="mcp-toggle-thumb"></div>
+    </label>
+  </div>
+
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/11.2.0/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script>
@@ -4515,7 +4871,7 @@ textarea::placeholder,
   }
 
   /* ── Session Management ── */
-  const DEFAULT_MODEL = 'gpt-5.3-instant';
+  const DEFAULT_MODEL = 'gpt-5-mini';
   const INITIAL_MESSAGES_TEMPLATE = document.getElementById('messages')?.innerHTML || '';
   let currentSessionId = null;
   let selectedModel = DEFAULT_MODEL;
@@ -4560,6 +4916,385 @@ textarea::placeholder,
     'Покажи пример TaskGroup для параллельных запросов',
     'Составь короткий план для фикса бага в iOS приложении',
   ]);
+
+  // ── MCP State ───────────────────────────────────────────────────────────────
+  const MCP_STATE = {
+    connected: false,
+    toolsVerified: false,
+  };
+
+  // ── Sheet ───────────────────────────────────────────────────────────────────
+  function mcpOpenSheet() {
+    const overlay = document.getElementById('mcpOverlay');
+    const sheet = document.getElementById('mcpSheet');
+    if (overlay) overlay.classList.add('open');
+    if (sheet) sheet.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function mcpCloseSheet() {
+    const overlay = document.getElementById('mcpOverlay');
+    const sheet = document.getElementById('mcpSheet');
+    if (overlay) overlay.classList.remove('open');
+    if (sheet) sheet.classList.remove('open');
+    document.body.style.overflow = '';
+  }
+
+  function mcpToggleSearch() {
+    const toggle = document.getElementById('mcpWebSearchToggle');
+    if (!toggle) return;
+    toggle.checked = !toggle.checked;
+    mcpHandleToggle(toggle.checked);
+  }
+
+  // ── Connect / Disconnect ────────────────────────────────────────────────────
+  async function mcpHandleToggle(enabled) {
+    console.log('[MCP] mcpHandleToggle enabled=', enabled);
+    if (enabled) {
+      await mcpConnect();
+    } else {
+      mcpDisconnect();
+    }
+  }
+
+  async function mcpConnect() {
+    console.log('[MCP] mcpConnect: checking /mcp/ddg/tools');
+    try {
+      const resp = await fetch('/mcp/ddg/tools');
+      console.log('[MCP] /mcp/ddg/tools status=', resp.status);
+      const data = await resp.json();
+      console.log('[MCP] /mcp/ddg/tools response=', data);
+      if (!resp.ok || !data.success) {
+        mcpSetToggle(false);
+        mcpShowError(`MCP-сервер недоступен: ${(data && data.error) || 'неизвестная ошибка'}`);
+        return;
+      }
+
+      MCP_STATE.connected = true;
+      MCP_STATE.toolsVerified = true;
+      mcpSetToggle(true);
+      mcpShowStatusBar(true);
+      mcpCloseSheet();
+      console.log('[MCP] mcpConnect success');
+    } catch (err) {
+      console.error('[MCP] mcpConnect error:', err);
+      mcpSetToggle(false);
+      mcpShowError('Не удалось подключиться к MCP-серверу. Убедитесь что server.py запущен.');
+    }
+  }
+
+  function mcpDisconnect() {
+    console.log('[MCP] mcpDisconnect');
+    MCP_STATE.connected = false;
+    MCP_STATE.toolsVerified = false;
+    mcpSetToggle(false);
+    mcpShowStatusBar(false);
+  }
+
+  // ── UI helpers ──────────────────────────────────────────────────────────────
+  function mcpSetToggle(on) {
+    const toggle = document.getElementById('mcpWebSearchToggle');
+    if (toggle) toggle.checked = Boolean(on);
+  }
+
+  function mcpShowStatusBar(visible) {
+    const bar = document.getElementById('mcpStatusBar');
+    if (!bar) return;
+    bar.classList.toggle('visible', visible);
+  }
+
+  function mcpShowError(msg) {
+    if (typeof showNotification === 'function') {
+      showNotification(msg, 'error');
+    } else {
+      alert(msg);
+    }
+  }
+
+  // ── MCP Tool Detection ──────────────────────────────────────────────────────
+  const DEFINE_PREFIXES = [
+    'что такое ',
+    'что такие ',
+    'определение ',
+    'define ',
+    'what is ',
+    'what are ',
+  ];
+
+  function mcpDetectTool(text) {
+    const rawText = String(text || '');
+    const normalized = rawText.trim();
+    const lower = normalized.toLowerCase();
+    for (const prefix of DEFINE_PREFIXES) {
+      if (lower.startsWith(prefix)) {
+        const term = normalized.slice(prefix.length).replace(/[?!.]+$/, '').trim();
+        if (term) return { tool: 'define', term };
+      }
+    }
+    return { tool: 'search', query: normalized };
+  }
+
+  function escapeHtml(str) {
+    if (typeof str !== 'string') return '';
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function getLastAssistantMessageContainer(lastAssistantMsgEl = null) {
+    if (lastAssistantMsgEl && lastAssistantMsgEl.querySelector) {
+      return lastAssistantMsgEl.querySelector('.bubble.assistant') || lastAssistantMsgEl.querySelector('.bubble');
+    }
+    const nodes = document.querySelectorAll('#messages .msg.bot');
+    const last = nodes[nodes.length - 1];
+    if (!last) return null;
+    return last.querySelector('.bubble.assistant') || last.querySelector('.bubble');
+  }
+
+  function mcpBuildResultCard(mcpData) {
+    if (!mcpData || !mcpData.success || !mcpData.data) return null;
+
+    const tool = mcpData.tool || 'search';
+    const d = Array.isArray(mcpData.data) ? { related: mcpData.data } : mcpData.data;
+    const iconMap = {
+      search: '🔍',
+      define: '📖',
+      related_topics: '🔗',
+      save_bookmark: '🔖',
+      search_bookmarks: '🔖',
+    };
+    const titleMap = {
+      search: 'Поиск в сети',
+      define: 'Определение',
+      related_topics: 'Связанные темы',
+      save_bookmark: 'Закладка',
+      search_bookmarks: 'Закладки',
+    };
+
+    const icon = iconMap[tool] || '🔧';
+    const title = titleMap[tool] || tool;
+    let bodyHTML = '';
+
+    if (d && d.heading) bodyHTML += `<div class="mcp-result-title">${escapeHtml(d.heading)}</div>`;
+    if (d && d.abstract) bodyHTML += `<div class="mcp-result-body">${escapeHtml(d.abstract)}</div>`;
+    if (d && d.definition) bodyHTML += `<div class="mcp-result-body">${escapeHtml(d.definition)}</div>`;
+    if (d && d.answer && !d.abstract) bodyHTML += `<div class="mcp-result-body">${escapeHtml(d.answer)}</div>`;
+
+    if (d && Array.isArray(d.related) && d.related.length) {
+      const items = d.related
+        .slice(0, 3)
+        .filter((r) => r && r.text)
+        .map((r) => {
+          const text = escapeHtml(String(r.text || ''));
+          const url = String(r.url || '').trim();
+          if (!url) return text;
+          return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">${text}</a>`;
+        })
+        .join('<br>');
+      if (items) bodyHTML += `<div class="mcp-result-body" style="margin-top:6px">${items}</div>`;
+    }
+
+    if (d && d.source && d.url) {
+      bodyHTML += `<div class="mcp-result-source">Источник: <a href="${escapeHtml(String(d.url || ''))}" target="_blank" rel="noopener">${escapeHtml(String(d.source || ''))}</a></div>`;
+    }
+
+    if (!bodyHTML) return null;
+
+    const card = document.createElement('div');
+    card.className = 'mcp-result-card';
+    card.innerHTML = `
+      <div class="mcp-result-header">
+        <span>${icon}</span>
+        <span>${escapeHtml(title)}</span>
+      </div>
+      ${bodyHTML}
+    `;
+    return card;
+  }
+
+  // ── Утилита: проверить полезность MCP-результата ───────────────────────────
+  function mcpExtractUsefulContext(data, diagnostics = null) {
+    const MAX_CONTEXT_CHARS = 400;
+    const setReason = (reason, details = '') => {
+      if (!diagnostics || typeof diagnostics !== 'object') return;
+      diagnostics.reason = reason;
+      diagnostics.details = details;
+    };
+
+    if (data == null) {
+      setReason('empty_payload');
+      return null;
+    }
+
+    const payload = Array.isArray(data) ? { related: data } : data;
+    if (typeof payload !== 'object') {
+      setReason('invalid_payload_type', typeof data);
+      return null;
+    }
+
+    if (payload.error) {
+      setReason('error_field', String(payload.error));
+      return null;
+    }
+
+    const parts = [];
+    if (payload.heading && String(payload.heading).trim()) {
+      parts.push(String(payload.heading).trim());
+    }
+    if (payload.abstract && String(payload.abstract).trim()) {
+      parts.push(String(payload.abstract).trim());
+    }
+
+    let definitionRejected = false;
+    if (payload.definition && String(payload.definition).trim()) {
+      const definition = String(payload.definition).trim();
+      const normalizedDefinition = definition.toLowerCase();
+      const isErrorMsg = normalizedDefinition.includes('не найдено')
+        || normalizedDefinition.includes('попробуйте')
+        || normalizedDefinition.includes('не удалось');
+      if (!isErrorMsg) {
+        parts.push(definition);
+      } else {
+        definitionRejected = true;
+      }
+    }
+
+    if (payload.answer && String(payload.answer).trim()) {
+      parts.push(String(payload.answer).trim());
+    }
+
+    if (parts.length === 0 && Array.isArray(payload.related)) {
+      const relatedItems = payload.related
+        .map((item) => {
+          if (typeof item === 'string') return item.trim();
+          if (item && typeof item.text === 'string') return item.text.trim();
+          return '';
+        })
+        .filter(Boolean)
+        .slice(0, 3);
+      if (relatedItems.length > 0) {
+        parts.push(...relatedItems);
+      }
+    }
+
+    if (parts.length === 0) {
+      if (definitionRejected) {
+        setReason('definition_not_found');
+      } else if (payload.fallback === true) {
+        setReason('fallback_empty');
+      } else {
+        setReason('empty_fields');
+      }
+      return null;
+    }
+
+    const context = parts.join('\n').slice(0, MAX_CONTEXT_CHARS);
+    setReason('ok', `chars=${context.length}`);
+    return context;
+  }
+
+  // ── Enriched Send ───────────────────────────────────────────────────────────
+  async function mcpEnrichedSend(userText) {
+    console.log('[MCP] mcpEnrichedSend called, connected=', MCP_STATE.connected);
+    if (!MCP_STATE.connected) {
+      console.log('[MCP] MCP off, sending normally');
+      return await chatSend(userText, null);
+    }
+
+    const detection = mcpDetectTool(userText);
+    console.log(
+      '[MCP] detected tool=',
+      detection.tool,
+      'term=',
+      detection.term,
+      'query=',
+      detection.query,
+    );
+    let mcpResult = null;
+    let contextStr = null;
+
+    try {
+      const runMcpRequest = async (body, stageLabel) => {
+        console.log('[MCP]', stageLabel, 'fetching /mcp/ddg/search with body=', JSON.stringify(body));
+        const resp = await fetch('/mcp/ddg/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        console.log('[MCP]', stageLabel, '/mcp/ddg/search status=', resp.status);
+        const data = await resp.json();
+        console.log('[MCP]', stageLabel, '/mcp/ddg/search response=', data);
+
+        if (!resp.ok || !data.success) {
+          console.log('[MCP]', stageLabel, 'context rejected reason=api_failure');
+          return null;
+        }
+
+        const diagnostics = {};
+        const candidate = mcpExtractUsefulContext(data.data, diagnostics);
+        if (!candidate) {
+          console.log(
+            '[MCP]',
+            stageLabel,
+            'context rejected reason=',
+            diagnostics.reason || 'unknown',
+            'details=',
+            diagnostics.details || null,
+          );
+          return null;
+        }
+        console.log('[MCP]', stageLabel, 'context accepted preview=', candidate.slice(0, 80));
+        return { data, context: candidate };
+      };
+
+      const body1 = detection.tool === 'define'
+        ? { tool: 'define', term: detection.term }
+        : { tool: 'search', query: userText };
+
+      const primary = await runMcpRequest(body1, 'primary');
+      if (primary && primary.context) {
+        contextStr = primary.context;
+        mcpResult = primary.data;
+      }
+
+      if (!contextStr && detection.tool === 'define') {
+        const fallbackQueries = [];
+        const termQuery = String(detection.term || '').trim();
+        const textQuery = String(userText || '').trim();
+        if (termQuery) fallbackQueries.push(termQuery);
+        if (textQuery && textQuery !== termQuery) fallbackQueries.push(textQuery);
+
+        for (let i = 0; i < fallbackQueries.length; i += 1) {
+          const query = fallbackQueries[i];
+          const stageLabel = i === 0 ? 'fallback_term' : 'fallback_user_text';
+          console.log('[MCP] define empty, trying', stageLabel, 'query=', query);
+          const fallbackResult = await runMcpRequest({ tool: 'search', query }, stageLabel);
+          if (fallbackResult && fallbackResult.context) {
+            contextStr = fallbackResult.context;
+            mcpResult = fallbackResult.data;
+            break;
+          }
+        }
+
+        if (!contextStr) {
+          console.log('[MCP] define fallbacks exhausted without useful context');
+        }
+      }
+    } catch (err) {
+      console.error('[MCP] enrichment error:', err);
+      contextStr = null;
+      mcpResult = null;
+    }
+
+    const finalText = contextStr
+      ? `${userText}\n\n[Контекст из DuckDuckGo]\n${contextStr}`
+      : userText;
+    console.log('[MCP] finalText preview=', finalText.slice(0, 100), '| mcpResult=', !!mcpResult);
+
+    return await chatSend(finalText, mcpResult);
+  }
 
   const QuickStartPanel = (() => {
     const state = {
@@ -6961,7 +7696,6 @@ textarea::placeholder,
      TOKEN TRACKER
   ══════════════════════════════════════════════════════════ */
   const MODEL_CONTEXT = {
-    'gpt-5.3-instant': 400_000,
     'gpt-5.2': 400_000,
     'gpt-5.1': 400_000,
     'gpt-5': 400_000,
@@ -7252,6 +7986,67 @@ textarea::placeholder,
   }
 
   /* ── Chat ── */
+  async function chatSend(text, mcpResult = null) {
+    const res = await fetch('/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, model: getSelectedModel(), session_id: currentSessionId }),
+    });
+
+    let data = null;
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      data = await res.json();
+    }
+
+    if (!res.ok) {
+      removeTyping();
+      if (data && data.token_stats) {
+        TokenTracker.record(data.token_stats, null);
+        const overflowMsg = buildOverflowMessage(data.token_stats);
+        if (overflowMsg) {
+          addMsg('bot', `⚠️ ${overflowMsg}`);
+          return data;
+        }
+      }
+      throw new Error((data && data.error) || `HTTP ${res.status}`);
+    }
+
+    removeTyping();
+    if (data && data.model) {
+      applyCurrentModel(data.model);
+    }
+
+    const finishReason = String((data && data.finish_reason) || '');
+    const isStateBlocked = finishReason.startsWith('state_blocked');
+    const msgEl = addMsg('bot', (data && data.reply) || '⚠️ Пустой ответ');
+
+    if (mcpResult) {
+      const card = mcpBuildResultCard(mcpResult);
+      const container = getLastAssistantMessageContainer(msgEl);
+      if (card && container) {
+        container.appendChild(card);
+        const box = document.getElementById('messages');
+        if (box) box.scrollTop = box.scrollHeight;
+      }
+    }
+
+    if (data && data.token_stats) {
+      TokenTracker.record(data.token_stats, msgEl);
+    }
+    if (data && data.ctx_stats) {
+      DebugMenu.updateCtxStats(data.ctx_stats);
+    } else if (data && data.ctx_state) {
+      DebugMenu.updateCtxState(data.ctx_state);
+    }
+    updateWorkingView((data && data.working_view) || null, (data && data.working_actions) || []);
+    if (data) DebugMenu.refreshMemoryLayers();
+    if (isStateBlocked) {
+      pulseStateBadge();
+    }
+    return data;
+  }
+
   async function sendMsg(textOverride = null) {
     if (isBusy) return;
     const inp = document.getElementById('userInput');
@@ -7272,49 +8067,7 @@ textarea::placeholder,
       hideWelcome();
       addMsg('user', text);
       showTyping();
-
-      const res = await fetch('/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, model: getSelectedModel(), session_id: currentSessionId }),
-      });
-      let data = null;
-      const contentType = res.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        data = await res.json();
-      }
-      if (!res.ok) {
-        removeTyping();
-        if (data && data.token_stats) {
-          TokenTracker.record(data.token_stats, null);
-          const overflowMsg = buildOverflowMessage(data.token_stats);
-          if (overflowMsg) {
-            addMsg('bot', `⚠️ ${overflowMsg}`);
-            return;
-          }
-        }
-        throw new Error((data && data.error) || `HTTP ${res.status}`);
-      }
-      removeTyping();
-      if (data && data.model) {
-        applyCurrentModel(data.model);
-      }
-      const finishReason = String((data && data.finish_reason) || '');
-      const isStateBlocked = finishReason.startsWith('state_blocked');
-      const msgEl = addMsg('bot', (data && data.reply) || '⚠️ Пустой ответ');
-      if (data && data.token_stats) {
-        TokenTracker.record(data.token_stats, msgEl);
-      }
-      if (data && data.ctx_stats) {
-        DebugMenu.updateCtxStats(data.ctx_stats);
-      } else if (data && data.ctx_state) {
-        DebugMenu.updateCtxState(data.ctx_state);
-      }
-      updateWorkingView((data && data.working_view) || null, (data && data.working_actions) || []);
-      if (data) DebugMenu.refreshMemoryLayers();
-      if (isStateBlocked) {
-        pulseStateBadge();
-      }
+      await mcpEnrichedSend(text);
     } catch (err) {
       removeTyping();
       console.error('[CHAT_ERROR]', err);

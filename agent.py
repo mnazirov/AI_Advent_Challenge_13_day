@@ -103,11 +103,10 @@ class RollbackPolicy:
 class IOSAgent:
     """iOS product assistant with memory layers and internal workflow orchestration."""
 
-    DEFAULT_MODEL = "gpt-5.3-instant"
+    DEFAULT_MODEL = "gpt-5-mini"
     DEFAULT_USER_ID = "default_local_user"
     MODEL_FALLBACK_ORDER = ("gpt-5-mini", "gpt-4o-mini")
     COST_PER_1M = {
-        "gpt-5.3-instant": {"input": 1.75, "output": 14.00},
         "gpt-5.2": {"input": 1.75, "output": 14.00},
         "gpt-5.1": {"input": 1.25, "output": 10.00},
         "gpt-5": {"input": 1.25, "output": 10.00},

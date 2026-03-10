@@ -254,25 +254,26 @@ class _RollbackValidationLLMClient:
 
 
 class ModelRegistryTests(unittest.TestCase):
-    def test_default_model_is_gpt_5_3_instant(self) -> None:
-        self.assertEqual(IOSAgent.DEFAULT_MODEL, "gpt-5.3-instant")
+    def test_default_model_is_gpt_5_mini(self) -> None:
+        self.assertEqual(IOSAgent.DEFAULT_MODEL, "gpt-5-mini")
 
-    def test_gpt_5_3_instant_is_available(self) -> None:
+    def test_gpt_5_mini_is_available(self) -> None:
         models = IOSAgent.available_models()
-        self.assertIn("gpt-5.3-instant", models)
+        self.assertIn("gpt-5-mini", models)
+        self.assertNotIn("gpt-5.3-instant", models)
 
-    def test_validate_accepts_gpt_5_3_instant(self) -> None:
-        validated = IOSAgent._validate_model("gpt-5.3-instant")
-        self.assertEqual(validated, "gpt-5.3-instant")
+    def test_validate_accepts_gpt_5_mini(self) -> None:
+        validated = IOSAgent._validate_model("gpt-5-mini")
+        self.assertEqual(validated, "gpt-5-mini")
 
     def test_model_not_found_falls_back_to_gpt_5_mini(self) -> None:
         agent = IOSAgent.__new__(IOSAgent)
         agent.llm_client = _FailThenSuccessClient()
         agent.ctx = _StubCtx()
-        agent.model = "gpt-5.3-instant"
+        agent.model = "gpt-5.2"
 
         response = agent._create_chat_completion(
-            model="gpt-5.3-instant",
+            model="gpt-5.2",
             messages=[{"role": "user", "content": "ping"}],
         )
 
@@ -288,7 +289,7 @@ class OpenAIClientContentNormalizationTests(unittest.TestCase):
         client = OpenAILLMClient.__new__(OpenAILLMClient)
         raw = SimpleNamespace(
             id="raw-id",
-            model="gpt-5.3-instant",
+            model="gpt-5-mini",
             choices=[
                 SimpleNamespace(
                     finish_reason="stop",
@@ -312,7 +313,7 @@ class OpenAIClientContentNormalizationTests(unittest.TestCase):
         client = OpenAILLMClient.__new__(OpenAILLMClient)
         raw = SimpleNamespace(
             id="raw-id",
-            model="gpt-5.3-instant",
+            model="gpt-5-mini",
             choices=[
                 SimpleNamespace(
                     finish_reason="stop",

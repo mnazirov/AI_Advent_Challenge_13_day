@@ -162,7 +162,7 @@ python3 app.py
 - Сервер в текущем entrypoint запускается с `debug=True`.
 
 Примечания по env:
-- `OPENAI_MODEL` можно задать для стартовой модели (иначе `gpt-5.3-instant`).
+- `OPENAI_MODEL` можно задать для стартовой модели (иначе `gpt-5-mini`).
 - `DEEPSEEK_API_KEY` и `HUGGINGFACE_API_KEY` есть в `.env.example` как заготовка, но runtime этого проекта сейчас использует OpenAI-клиент.
 
 ## Поведение state machine
@@ -189,7 +189,7 @@ python3 app.py
 
 ## Модели
 
-- Модель по умолчанию: `gpt-5.3-instant`.
+- Модель по умолчанию: `gpt-5-mini`.
 - Список доступных моделей возвращает `GET /models`.
 - Если запрошенная модель недоступна, агент делает fallback на `gpt-5-mini`, затем `gpt-4o-mini`.
 
